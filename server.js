@@ -1,4 +1,23 @@
+require('dotenv').config(); // Load .env file variables
+
 const WebSocket = require('ws');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+
+// --- Add your API Key ---
+// Ensure you have your Google AI API key set as an environment variable (GOOGLE_API_KEY)
+// or replace "YOUR_API_KEY" below.
+// WARNING: Never commit your API key directly into your code!
+const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || "YOUR_API_KEY";
+let genAI;
+let model;
+if (GOOGLE_API_KEY && GOOGLE_API_KEY !== "YOUR_API_KEY") {
+    genAI = new GoogleGenerativeAI(GOOGLE_API_KEY);
+    model = genAI.getGenerativeModel({ model: "gemini-1.5-flash"}); // Or your preferred model
+    console.log("Google Generative AI initialized.");
+} else {
+    console.warn("Google API Key not found or is placeholder. AI functionality will be disabled.");
+}
+// --------------------------
 
 const wss = new WebSocket.Server({ port: 8086 });
 
@@ -82,12 +101,36 @@ wss.on('connection', (ws) => {
                     console.log(`Empty message received from ${currentUsername}`);
                     return; // Ignore empty messages
                 }
-                // Broadcast the message object (server is source of truth)
-                broadcast({
+
+                // Normal message broadcast
+                const originalMessage = {
                     type: 'message',
                     username: currentUsername,
-                    text: messageText // Send trimmed message
-                });
+                    text: messageText
+                };
+                broadcast(originalMessage);
+
+                // Check if message is for AI
+                if (messageText.toLowerCase().startsWith('ai ') && model) {
+                    const question = messageText.substring(3).trim(); // Get text after "AI "
+                    if (question) {
+                        console.log(`Asking AI: "${question}"`);
+                        // Get AI response asynchronously
+                        getGeminiResponse(question)
+                            .then(aiResponse => {
+                                broadcast({
+                                    type: 'message',
+                                    username: 'AI',
+                                    text: aiResponse
+                                });
+                            })
+                            .catch(error => {
+                                console.error("Error getting AI response:", error);
+                                // Optionally notify the user about the error
+                                safeSend(ws, { type: 'system', text: 'Error: Could not get response from AI.' });
+                            });
+                    }
+                }
                 break;
 
             default:
@@ -178,7 +221,13 @@ function broadcast(messageObj, senderWs = null) {
 // Helper function to get the list of current usernames
 function getUserList() {
     // Filter out any potentially null/undefined usernames, just in case
-    return Array.from(clients.values()).filter(username => !!username).sort(); // Sort alphabetically
+    const userList = Array.from(clients.values()).filter(username => !!username);
+    userList.push("AI"); // Always include AI
+    return userList.sort((a, b) => { // Custom sort: AI first, then alphabetical
+        if (a === "AI") return -1;
+        if (b === "AI") return 1;
+        return a.localeCompare(b);
+    });
 }
 
 // Helper function to send the user list to a specific client
@@ -203,3 +252,22 @@ function broadcastUserList() {
           }
      });
 }
+
+// --- New function to get response from Gemini ---
+async function getGeminiResponse(prompt) {
+    if (!model) {
+        console.log("AI model not initialized. Skipping Gemini request.");
+        return "Sorry, the AI is currently unavailable.";
+    }
+    try {
+        const result = await model.generateContent(prompt);
+        const response = await result.response;
+        const text = response.text();
+        console.log("AI Response:", text);
+        return text;
+    } catch (error) {
+        console.error("Error calling Gemini API:", error);
+        return "Sorry, I encountered an error trying to respond."; // User-friendly error
+    }
+}
+// -----------------------------------------------
