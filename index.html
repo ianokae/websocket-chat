@@ -229,11 +229,31 @@
                                  // Maybe prompt again or inform user to refresh
                                  alert(data.text + "\nPlease refresh and try a different name.");
                                  websocket.close(); // Close the problematic connection
+                            } else if (data.text.includes("Chat history loaded")) {
+                                // This indicates history *should* have been received and processed just before this message.
+                                // We can now be sure the initial connection messages are less likely to be immediately cleared.
+                                // Optional: Could add a small delay or flag if needed, but usually processing order is fine.
                             }
                             break;
                         case 'userList':
                             updateUserList(data.users);
                             break;
+                        case 'chatHistory': // Handle the chat history
+                             console.log(`Received history with ${data.history.length} messages.`);
+                             chatArea.innerHTML = ''; // Clear any existing messages (like "Connecting...")
+                             data.history.forEach(msg => {
+                                 if (msg.type === 'message') {
+                                     const messageClass = msg.username === username ? 'my-message' : 'other-message';
+                                     const displayName = msg.username === username ? 'You' : msg.username;
+                                     appendMessage(`<strong>${displayName}:</strong> ${msg.text}`, messageClass);
+                                 } else if (msg.type === 'system') {
+                                     appendMessage(msg.text, 'system');
+                                 }
+                                 // Add handling for other message types if necessary
+                             });
+                             // Scroll to bottom after loading history
+                             chatArea.scrollTop = chatArea.scrollHeight;
+                             break;
                         default:
                             appendMessage(`Received unknown format: ${event.data}`, 'system');
                     }
