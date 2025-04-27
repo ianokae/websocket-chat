@@ -135,6 +135,31 @@
             display: table;
             clear: both;
         }
+
+        #chat-area p.action { /* Style for /me action messages */
+            font-style: italic;
+            color: #6a1b9a; /* Distinct color, maybe purple? */
+            background-color: #f3e5f5; /* Light purple background */
+            text-align: center; /* Or keep text-align: left/right based on who sent? Let's try center first. */
+            max-width: 100%;
+            margin-top: 8px; /* Add a bit more space */
+            margin-bottom: 8px;
+
+            margin-left: 0; /* Overwrite the default margin-left for .my-message */
+            float: left; /* Overwrite the default float: right for .my-message */
+        }
+
+        /* Style for private system messages (e.g., errors just for user) */
+        #chat-area p.private-system {
+            font-style: italic;
+            color: #b71c1c; /* Dark red color for errors/private info */
+            background-color: #ffebee; /* Light pink background */
+            text-align: left;
+            padding: 5px 10px;
+            margin: 6px 0;
+            border: 1px dashed #f44336; /* Dashed red border */
+            max-width: 90%; /* Don't span full width */
+        }
     </style>
 </head>
 <body>
@@ -195,7 +220,8 @@
             // Use window.location.hostname for dynamic local/deployed detection if needed
             // const wsHost = window.location.hostname || 'localhost';
             // websocket = new WebSocket(`ws://${wsHost}:8086`);
-            websocket = new WebSocket('ws://3.72.72.221:8086');
+            //websocket = new WebSocket('ws://3.72.72.221:8086');
+            websocket = new WebSocket('ws://10.0.0.3:8086');
 
 
             websocket.onopen = () => {
@@ -248,13 +274,27 @@
                                      appendMessage(`<strong>${displayName}:</strong> ${msg.text}`, messageClass);
                                  } else if (msg.type === 'system') {
                                      appendMessage(msg.text, 'system');
+                                 } else if (msg.type === 'action') {
+                                     // Determine alignment based on who sent the action in the history
+                                     const actionClass = msg.username?.toLowerCase() === username?.toLowerCase() ? 'my-message' : 'other-message';
+                                     // Pass both the alignment class and the specific action class
+                                     appendMessage(msg.text, ['action', actionClass]);
                                  }
                                  // Add handling for other message types if necessary
                              });
                              // Scroll to bottom after loading history
                              chatArea.scrollTop = chatArea.scrollHeight;
                              break;
-                        default:
+                         case 'privateSystem': // Handle private system messages from server
+                             appendMessage(data.text, 'private-system'); // Use the new distinct class
+                             break;
+                        case 'action': // Handle /me action messages
+                             // Use case-insensitive comparison for robustness
+                             const actionClass = data.username?.toLowerCase() === username?.toLowerCase() ? 'my-message' : 'other-message';
+                             // Pass both the alignment class and the specific action class
+                             appendMessage(data.text, ['action', actionClass]);
+                              break;
+                         default:
                             appendMessage(`Received unknown format: ${event.data}`, 'system');
                     }
                 } catch (e) {
@@ -293,9 +333,26 @@
             }
 
             if (websocket && websocket.readyState === WebSocket.OPEN) {
-                websocket.send(JSON.stringify({ type: 'message', text: messageText }));
-                 // Don't append own message here anymore, wait for broadcast from server
-                 // This ensures consistency if server modifies/rejects message
+                if (messageText.startsWith('/')) {
+                    // Handle as command
+                    const parts = messageText.substring(1).split(' '); // Remove '/' and split by space
+                    const command = parts[0].toLowerCase();
+                    const args = parts.slice(1).join(' ');
+
+                    if (!command) {
+                        appendMessage("Error: Empty command.", 'system'); // Local feedback
+                        return;
+                    }
+
+                    console.log(`Sending command: /${command} with args: "${args}"`);
+                    websocket.send(JSON.stringify({ type: 'command', command: command, args: args }));
+
+                } else {
+                    // Handle as regular message
+                    websocket.send(JSON.stringify({ type: 'message', text: messageText }));
+                    // Don't append own message here anymore, wait for broadcast from server
+                }
+
                 messageInput.value = '';
                 messageInput.focus();
             } else {
@@ -305,8 +362,11 @@
 
         function appendMessage(messageHTML, typeClass = '') {
             const messageElement = document.createElement('p');
-            if (typeClass) {
-                 messageElement.classList.add(typeClass);
+            // Handle single class string or array of classes
+            if (Array.isArray(typeClass)) {
+                messageElement.classList.add(...typeClass);
+            } else if (typeClass) {
+                messageElement.classList.add(typeClass);
             }
             messageElement.innerHTML = messageHTML; // Use innerHTML for <strong> tags etc.
 
