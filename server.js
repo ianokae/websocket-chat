@@ -113,6 +113,33 @@ wss.on('connection', (ws) => {
                      broadcast(actionMessage);
                      appendToHistory(actionMessage); // Append action to history
                      break;
+                 case 'quit':
+                     // Use the whole argument string as the reason, if provided
+                     const reason = args.trim() || null; // Get trimmed args or null if empty
+
+                     const leaveText = reason
+                         ? `${currentUsername} has left the chat (${reason})` // Keep parens for display consistency
+                         : `${currentUsername} has left the chat.`;
+
+                     const leaveMessage = {
+                         type: 'system',
+                         text: leaveText
+                     };
+
+                     console.log(`${currentUsername} is quitting.${reason ? ' Reason: ' + reason : ''}`);
+
+                     // Log the message being broadcast
+                     console.log('Broadcasting leave message:', JSON.stringify(leaveMessage));
+
+                     // Append leave message to history
+                     appendToHistory(leaveMessage);
+                     // Notify remaining clients (exclude sender)
+                     broadcast(leaveMessage, ws);
+                     // Broadcast updated user list
+                     broadcastUserList();
+                     // Close the connection gracefully with a reason
+                     ws.close(1000, `Quit command used${reason ? ': ' + reason : ''}`);
+                     break;
                  // Add more command cases here in the future
                  default:
                      safeSend(ws, { type: 'privateSystem', text: `Unknown command '/${command}'` });
@@ -233,17 +260,21 @@ wss.on('connection', (ws) => {
             console.log(`Client ${username} disconnected (Code: ${code}, Reason: ${reasonText})`);
             const existed = clients.delete(ws); // Remove client
             if (existed) {
-                 // Create leave message object
-                 const leaveMessage = {
-                     type: 'system',
-                     text: `${username} has left the chat.`
-                 };
-                 // Append leave message to history
-                 appendToHistory(leaveMessage);
-                 // Notify remaining clients
-                 broadcast(leaveMessage);
-                 // Broadcast updated user list
-                broadcastUserList();
+                 // Only broadcast the leave message from here if it wasn't a normal /quit command exit
+                 if (code !== 1000 || !reason?.toString().startsWith('Quit command used')) {
+                     // Create leave message object
+                     const leaveMessage = {
+                         type: 'system',
+                         text: `${username} has left the chat.`
+                     };
+                     // Append leave message to history (might consider skipping if already added by /quit?)
+                     // For simplicity, we might double-append here, but broadcast is the key part to fix.
+                     appendToHistory(leaveMessage);
+                     // Notify remaining clients
+                     broadcast(leaveMessage);
+                 }
+                 // Always broadcast updated user list regardless of close reason
+                 broadcastUserList();
             }
         } else {
             console.log(`Unidentified client disconnected (Code: ${code}, Reason: ${reasonText})`);
