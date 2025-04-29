@@ -4,11 +4,14 @@
     <title>WebSocket Chat with User List</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
+        html {
+            height: 100%;
+        }
         body {
             font-family: sans-serif;
             display: flex;
             flex-direction: column;
-            height: 100vh;
+            height: 100%;
             margin: 0;
             box-sizing: border-box;
             overflow: hidden; /* Prevent body scroll */
@@ -189,6 +192,7 @@
             h1 {
                  font-size: 1.2em; /* Slightly smaller heading */
                  margin: 8px 0;
+                 flex-shrink: 0; /* Ensure header doesn't shrink */
             }
              /* Show and style the toggle button on mobile */
              #user-list-toggle {
@@ -199,7 +203,8 @@
                 flex-direction: column; /* Stack elements vertically */
                 padding: 0 5px 5px 5px; /* Adjust padding */
                 gap: 10px;
-                 height: calc(100% - 40px); /* Adjust based on h1 height */
+                 flex-grow: 1; /* Let main container grow */
+                 min-height: 0; /* Allow shrinking if needed */
             }
 
             #chat-container {
@@ -244,6 +249,7 @@
             .input-area {
                 margin-top: 5px;
                  padding: 0 5px; /* Add padding */
+                 flex-shrink: 0; /* Prevent input area from shrinking */
             }
 
             #message-input {
@@ -329,8 +335,8 @@
             // Use window.location.hostname for dynamic local/deployed detection if needed
             // const wsHost = window.location.hostname || 'localhost';
             // websocket = new WebSocket(`ws://${wsHost}:8086`);
-            //websocket = new WebSocket('ws://3.72.72.221:8086');
-            websocket = new WebSocket('ws://10.0.0.3:8086');
+            websocket = new WebSocket('ws://3.72.72.221:8086');
+            //websocket = new WebSocket('ws://10.0.0.3:8086');
 
 
             websocket.onopen = () => {
