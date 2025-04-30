@@ -104,14 +104,9 @@ wss.on('connection', (ws) => {
                          safeSend(ws, { type: 'privateSystem', text: 'Usage: /me <action>' });
                          return;
                      }
-                     const actionText = `* ${currentUsername} ${args} *`;
-                     const actionMessage = {
-                         type: 'action', // Use a dedicated type for /me actions
-                         username: currentUsername, // Add username for client-side alignment
-                         text: actionText
-                     };
-                     broadcast(actionMessage);
-                     appendToHistory(actionMessage); // Append action to history
+                     // Use helpers to create and process the action message
+                     const userActionMessage = createActionMessage(currentUsername, args);
+                     processAndBroadcast(userActionMessage); // Broadcast to everyone
                      break;
                  case 'quit':
                      // Use the whole argument string as the reason, if provided
@@ -128,13 +123,9 @@ wss.on('connection', (ws) => {
 
                      console.log(`${currentUsername} is quitting.${reason ? ' Reason: ' + reason : ''}`);
 
-                     // Log the message being broadcast
-                     console.log('Broadcasting leave message:', JSON.stringify(leaveMessage));
+                     // Use helper to append history and broadcast (excluding sender)
+                     processAndBroadcast(leaveMessage, ws);
 
-                     // Append leave message to history
-                     appendToHistory(leaveMessage);
-                     // Notify remaining clients (exclude sender)
-                     broadcast(leaveMessage, ws);
                      // Broadcast updated user list
                      broadcastUserList();
                      // Close the connection gracefully with a reason
@@ -203,10 +194,8 @@ wss.on('connection', (ws) => {
                      type: 'system',
                      text: `${newUsername} has joined the chat.`
                  };
-                // Append join message to history
-                appendToHistory(joinMessage);
-                // Notify all *other* clients that a new user joined
-                broadcast(joinMessage, ws); // Exclude the sender
+                 // Use helper to append history and broadcast (excluding sender)
+                 processAndBroadcast(joinMessage, ws);
 
                 // Broadcast updated user list to EVERYONE
                 broadcastUserList();
@@ -230,8 +219,8 @@ wss.on('connection', (ws) => {
                     username: currentUsername,
                     text: messageText
                 };
-                broadcast(originalMessage);
-                appendToHistory(originalMessage); // Append user message to history
+                // Use helper to append history and broadcast
+                processAndBroadcast(originalMessage);
 
                 // Check if message is for AI
                 if (messageText.toLowerCase().startsWith('ai ') && model) {
@@ -241,16 +230,28 @@ wss.on('connection', (ws) => {
                         // Get AI response asynchronously
                         getGeminiResponse(question)
                             .then(aiResponse => {
-                                // Create the AI message object
-                                const aiMessage = {
-                                    type: 'message',
-                                    username: 'AI',
-                                    text: aiResponse
-                                };
-                                // Append to history FIRST
-                                appendToHistory(aiMessage);
-                                // THEN broadcast it
-                                broadcast(aiMessage);
+                                const trimmedResponse = aiResponse?.trim();
+                                if (trimmedResponse && trimmedResponse.toLowerCase().startsWith('/me ')) {
+                                    const actionPart = trimmedResponse.substring(4).trim(); // Get text after "/me "
+                                    if (actionPart) {
+                                        // Use helpers to create and process the AI action message
+                                        const aiActionMessage = createActionMessage('AI', actionPart);
+                                        console.log('AI performing action:', aiActionMessage.text);
+                                        processAndBroadcast(aiActionMessage); // Broadcast action to everyone
+                                    } else {
+                                        // Handle empty /me command from AI? Log or ignore.
+                                        console.warn('AI sent an empty /me command.');
+                                    }
+                                } else {
+                                    // Treat as regular message
+                                    const aiMessage = {
+                                        type: 'message',
+                                        username: 'AI',
+                                        text: aiResponse // Use original (untrimmed) response here
+                                    };
+                                    // Use helper to append history and broadcast
+                                    processAndBroadcast(aiMessage);
+                                }
                             })
                             .catch(error => {
                                 console.error("Error getting AI response:", error);
@@ -274,18 +275,14 @@ wss.on('connection', (ws) => {
             console.log(`Client ${username} disconnected (Code: ${code}, Reason: ${reasonText})`);
             const existed = clients.delete(ws); // Remove client
             if (existed) {
-                 // Only broadcast the leave message from here if it wasn't a normal /quit command exit
                  if (code !== 1000 || !reason?.toString().startsWith('Quit command used')) {
                      // Create leave message object
                      const leaveMessage = {
                          type: 'system',
                          text: `${username} has left the chat.`
                      };
-                     // Append leave message to history (might consider skipping if already added by /quit?)
-                     // For simplicity, we might double-append here, but broadcast is the key part to fix.
-                     appendToHistory(leaveMessage);
-                     // Notify remaining clients
-                     broadcast(leaveMessage);
+                     // Use helper to append history and broadcast to everyone
+                     processAndBroadcast(leaveMessage);
                  }
                  // Always broadcast updated user list regardless of close reason
                  broadcastUserList();
@@ -311,10 +308,8 @@ wss.on('connection', (ws) => {
                        type: 'system',
                        text: `${username} disconnected due to an error.`
                    };
-                   // Append disconnect error message to history
-                   appendToHistory(disconnectErrorMessage);
-                   // Notify remaining clients
-                   broadcast(disconnectErrorMessage);
+                   // Use helper to append history and broadcast
+                   processAndBroadcast(disconnectErrorMessage);
                    broadcastUserList();
               }
         }
@@ -404,7 +399,7 @@ async function getGeminiResponse(prompt) {
     }
     try {
         // Add instructions to the prompt for chat-like responses
-        const finalPrompt = `You are an AI assistant in a simple WebSocket chat group application (like IRC) built by and for youth who are inspired by technology and creativity. Keep your responses concise and conversational, ideally 2-3 sentences maximum. Do not use markdown or special formatting. The user's message is: ${prompt}`;
+        const finalPrompt = `You are an AI assistant in a simple WebSocket chat group application (like IRC) built by and for youth who are inspired by technology and creativity. Keep your single-line responses concise and conversational, ideally 1-4 sentences. Do not use markdown or special formatting. You can also perform actions by starting your *first sentence*, *first characters* response with "/me " (e.g., "/me looks thoughtful."). The user's message is: ${prompt}`;
         console.log("Sending final prompt to AI:", finalPrompt); // Log the full prompt
         const result = await model.generateContent(finalPrompt);
         const response = await result.response;
@@ -424,4 +419,24 @@ function sendChatHistory(targetWs) {
          console.log(`Sending chat history (${chatHistory.length} messages) to ${targetWs.username}`);
          safeSend(targetWs, { type: 'chatHistory', history: chatHistory });
     }
+}
+
+// --- NEW: Helper to create consistent action message objects ---
+function createActionMessage(username, actionText) {
+    const formattedText = `* ${username} ${actionText} *`;
+    return {
+        type: 'action',
+        username: username, // Include username for client-side logic if needed
+        text: formattedText
+    };
+}
+
+// --- NEW: Helper to append to history and broadcast --- 
+function processAndBroadcast(messageObject, excludeSenderWs = null) {
+    if (!messageObject || typeof messageObject !== 'object' || !messageObject.type) {
+        console.warn('Attempted to process invalid message object:', messageObject);
+        return;
+    }
+    appendToHistory(messageObject);
+    broadcast(messageObject, excludeSenderWs);
 }
