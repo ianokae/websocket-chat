@@ -232,11 +232,16 @@ wss.on('connection', (ws) => {
                         // Get AI response asynchronously
                         getGeminiResponse(question)
                             .then(aiResponse => {
-                                broadcast({
+                                // Create the AI message object
+                                const aiMessage = {
                                     type: 'message',
                                     username: 'AI',
                                     text: aiResponse
-                                });
+                                };
+                                // Append to history FIRST
+                                appendToHistory(aiMessage);
+                                // THEN broadcast it
+                                broadcast(aiMessage);
                             })
                             .catch(error => {
                                 console.error("Error getting AI response:", error);
@@ -389,7 +394,10 @@ async function getGeminiResponse(prompt) {
         return "Sorry, the AI is currently unavailable.";
     }
     try {
-        const result = await model.generateContent(prompt);
+        // Add instructions to the prompt for chat-like responses
+        const finalPrompt = `You are an AI assistant in a simple WebSocket chat group application (like IRC) built by and for youth who are inspired by technology and creativity. Keep your responses concise and conversational, ideally 2-3 sentences maximum. Do not use markdown or special formatting. The user's message is: ${prompt}`;
+        console.log("Sending final prompt to AI:", finalPrompt); // Log the full prompt
+        const result = await model.generateContent(finalPrompt);
         const response = await result.response;
         const text = response.text();
         console.log("AI Response:", text);
