@@ -158,6 +158,15 @@ wss.on('connection', (ws) => {
                     return;
                 }
 
+                // --- Add check for reserved AI name ---
+                if (newUsername.toLowerCase() === 'ai') {
+                    console.log('Attempt to register as reserved username "AI".');
+                    safeSend(ws, { type: 'system', text: 'Error: Username "AI" is reserved.' });
+                    ws.close(1008, "Reserved username"); // Close connection
+                    return;
+                }
+                // --------------------------------------
+
                 // Check if username is already taken
                 let isTaken = false;
                 for (const username of clients.values()) {
