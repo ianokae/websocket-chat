@@ -1,6 +1,6 @@
 {
   "scripts": {
-    "upload-server": "scp -i \"simple-websocket-server.pem\" server.js ec2-user@3.72.72.221:/home/ec2-user",
+    "upload-server": "scp -i simple-websocket-server.pem server.js ec2-user@3.72.72.221:/home/ec2-user && ssh -i simple-websocket-server.pem ec2-user@3.72.72.221 'sudo systemctl restart websocket-server.service'",
     "upload-client": "aws s3 cp index.html s3://simple-socket-chat/ --profile ian"
   },
   "dependencies": {
