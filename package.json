@@ -1,7 +1,10 @@
 {
   "scripts": {
     "upload-server": "scp -i simple-websocket-server.pem server.js ec2-user@3.72.72.221:/home/ec2-user && ssh -i simple-websocket-server.pem ec2-user@3.72.72.221 'sudo systemctl restart websocket-server.service'",
-    "upload-client": "aws s3 cp index.html s3://simple-socket-chat/ --profile ian"
+    "upload-client": "aws s3 cp index.html s3://simple-socket-chat/ --profile ian",
+    "logs": "ssh -i simple-websocket-server.pem ec2-user@3.72.72.221 'journalctl -n 30 -u websocket-server.service'",
+    "logs-follow": "ssh -i simple-websocket-server.pem ec2-user@3.72.72.221 'journalctl -f -u websocket-server.service'",
+    "logs-time": "ssh -i simple-websocket-server.pem ec2-user@3.72.72.221 'journalctl --since \"5 minutes ago\" -u websocket-server.service'"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.0",
