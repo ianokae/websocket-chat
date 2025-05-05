@@ -5,6 +5,22 @@ const path = require('path'); // Add path module
 const WebSocket = require('ws');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
+// --- AI Memory Configuration ---
+const AI_HISTORY_DIR = path.join(__dirname, 'ai');
+const AI_MEMORY_LENGTH = 5; // Number of past user/AI message pairs to remember
+
+// Ensure AI history directory exists
+if (!fs.existsSync(AI_HISTORY_DIR)) {
+    try {
+        fs.mkdirSync(AI_HISTORY_DIR);
+        console.log(`Created AI history directory: ${AI_HISTORY_DIR}`);
+    } catch (error) {
+        console.error(`Failed to create AI history directory: ${AI_HISTORY_DIR}`, error);
+        // Decide if this is fatal or not. For now, we'll log and continue.
+    }
+}
+// -----------------------------
+
 // --- Add your API Key ---
 // Ensure you have your Google AI API key set as an environment variable (GOOGLE_API_KEY)
 // or replace "YOUR_API_KEY" below.
@@ -61,6 +77,65 @@ function appendToHistory(message) {
 
 // Load history on server start
 loadHistory();
+
+// --- NEW: AI User History Functions ---
+
+function getUserAiHistoryFilePath(username) {
+    // Basic sanitization: replace potentially problematic characters.
+    // A more robust solution might involve hashing or stricter validation.
+    const safeUsername = username.replace(/[^a-zA-Z0-9_-]/g, '_');
+    return path.join(AI_HISTORY_DIR, `${safeUsername}.json`);
+}
+
+function loadUserAiHistory(username) {
+    const filePath = getUserAiHistoryFilePath(username);
+    try {
+        if (fs.existsSync(filePath)) {
+            const data = fs.readFileSync(filePath, 'utf8');
+            const history = JSON.parse(data);
+            // Basic validation
+            if (Array.isArray(history)) {
+                 console.log(`Loaded ${history.length} AI interactions for user ${username}`);
+                 return history;
+            } else {
+                 console.warn(`Invalid AI history format found for user ${username}. Starting fresh.`);
+                 return [];
+            }
+        } else {
+            // console.log(`No AI history file found for user ${username}, starting fresh.`);
+            return []; // No history yet
+        }
+    } catch (error) {
+        console.error(`Error loading AI history for user ${username}:`, error);
+        return []; // Return empty history on error
+    }
+}
+
+function saveUserAiHistory(username, userPrompt, aiResponse) {
+    const filePath = getUserAiHistoryFilePath(username);
+    if (!userPrompt || !aiResponse) {
+         console.warn(`Attempted to save incomplete AI interaction for ${username}. Aborting.`);
+         return; // Don't save incomplete entries
+    }
+
+    let history = loadUserAiHistory(username); // Load existing history
+
+    // Add the new interaction
+    history.push({ userPrompt, aiResponse });
+
+    // Trim history to the desired length
+    if (history.length > AI_MEMORY_LENGTH) {
+        history = history.slice(-AI_MEMORY_LENGTH); // Keep only the last N items
+    }
+
+    try {
+        fs.writeFileSync(filePath, JSON.stringify(history, null, 2), 'utf8'); // Pretty print JSON
+        console.log(`Saved AI interaction (${history.length} total) for user ${username}`);
+    } catch (error) {
+        console.error(`Error writing AI history for user ${username}:`, error);
+    }
+}
+// --- End AI User History Functions ---
 
 const wss = new WebSocket.Server({ port: 8086 });
 
@@ -260,10 +335,22 @@ wss.on('connection', (ws) => {
                     // 3. If AI should respond, get and process the response
                     if (aiShouldRespond && aiQuery) {
                         console.log(`Asking AI (final query): "${aiQuery}"`);
-                        getGeminiResponse(aiQuery) // Use the extracted/original query
+
+                        // --- Load user's AI history ---
+                        const userAiHistory = loadUserAiHistory(currentUsername);
+                        // --------------------------------
+
+                        getGeminiResponse(aiQuery, userAiHistory) // Pass history to Gemini
                             .then(aiResponse => {
-                                // (Processing logic for /me or regular message remains the same)
                                 const trimmedResponse = aiResponse?.trim();
+
+                                // --- Save the interaction to history ---
+                                if (trimmedResponse) { // Only save if AI provided a non-empty response
+                                     saveUserAiHistory(currentUsername, aiQuery, aiResponse); // Save original prompt and response
+                                }
+                                // ---------------------------------------
+
+                                // (Processing logic for /me or regular message remains the same)
                                 if (trimmedResponse && trimmedResponse.toLowerCase().startsWith('/me ')) {
                                     const actionPart = trimmedResponse.substring(4).trim();
                                     if (actionPart) {
@@ -482,17 +569,30 @@ Message: "${messageText}"`;
 }
 
 // --- Updated function to get response from Gemini ---
-// (Prompt is slightly simplified as the trigger is now handled before calling this)
-async function getGeminiResponse(prompt) {
+// Now accepts user-specific AI interaction history
+async function getGeminiResponse(prompt, history = []) { // Add history parameter with default
     if (!model) {
         console.log("AI model not initialized. Skipping Gemini request.");
         return "Sorry, the AI is currently unavailable.";
     }
     try {
-        // Updated prompt: Assumes the 'prompt' is the core question/statement for the AI.
-        const finalPrompt = `You are an AI assistant in a simple WebSocket chat group application (like IRC) built by and for youth who are inspired by technology and creativity. Keep your single-line responses concise and conversational, ideally 1-4 sentences. Do not use markdown or special formatting. You can also perform actions by starting your *entire response text* with "/me " (e.g., "/me looks thoughtful."). Respond to the following user message:\n\n"${prompt}"`;
- 
-        console.log("Sending final prompt to AI:", finalPrompt); // Log the full prompt
+        // --- Construct history string for the prompt ---
+        let historyContext = "";
+        if (history && history.length > 0) {
+             historyContext = "Here is the recent conversation history with this user (most recent interaction last):\n";
+             history.forEach(interaction => {
+                 historyContext += `- User: "${interaction.userPrompt}"\n`;
+                 historyContext += `- AI: "${interaction.aiResponse}"\n`;
+             });
+             historyContext += "\nYou may consider this context when responding.\n\n";
+        }
+        // ---------------------------------------------
+
+        // Updated prompt including history context
+        const finalPrompt = `You are an AI assistant in a simple WebSocket chat group application (like IRC) built by and for youth who are inspired by technology, business, and creativity. Keep your single-line responses concise and conversational, ideally 1-4 sentences. Do not use markdown or special formatting. You can also perform actions by starting your *entire response text* with "/me " (e.g., "/me looks thoughtful."). \n\n${historyContext}Respond to the following latest user message:\n"${prompt}"`;
+
+        console.log("Sending final prompt to AI (with history):", finalPrompt); // Log the full prompt
+        // Only pass the final prompt string to generateContent
         const result = await model.generateContent(finalPrompt);
         const response = await result.response;
         const text = response.text();
