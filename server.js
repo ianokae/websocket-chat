@@ -141,6 +141,9 @@ const wss = new WebSocket.Server({ port: 8086 });
 
 // Store clients with their associated usernames: { ws => username }
 const clients = new Map();
+// --- NEW: Track users whose next message might be a follow-up to the AI ---
+const expectingAiFollowUpUsers = new Set();
+// -------------------------------------------------------------------------
 
 console.log('WebSocket server started on port 8086');
 
@@ -296,92 +299,124 @@ wss.on('connection', (ws) => {
                 };
                 processAndBroadcast(originalMessage); // Broadcast user message first
 
-                // --- New AI Trigger Logic ---
-                if (model) { // Only proceed if AI is configured
+                // --- Updated AI Trigger Logic ---
+                if (model) {
                     let aiShouldRespond = false;
                     let aiQuery = '';
+                    let wasFollowUpCheck = false;
+                    let userAiHistory = []; // Define here, load as needed
 
-                    // 1. Check for explicit triggers: @ai or ai: or ai? at the start
-                    const explicitMentionMatch = messageText.match(/^@?ai[:?]?\\s+(.*)/i);
+                    // 1. Check if this is potentially a follow-up message
+                    if (expectingAiFollowUpUsers.has(currentUsername)) {
+                        console.log(`Potential follow-up detected for user ${currentUsername}. Forcing check.`);
+                        wasFollowUpCheck = true;
+                        expectingAiFollowUpUsers.delete(currentUsername);
+                        // Load history specifically for this potential follow-up check
+                        userAiHistory = loadUserAiHistory(currentUsername);
+                    }
+
+                    // 2. Check for explicit triggers
+                    const explicitMentionMatch = messageText.match(/^@?ai[:?]?\s+(.*)/i);
                     if (explicitMentionMatch && explicitMentionMatch[1]) {
-                        aiShouldRespond = true;
-                        aiQuery = explicitMentionMatch[1].trim();
-                        console.log(`Explicit AI mention detected. Query: "${aiQuery}"`);
+                       aiShouldRespond = true;
+                       aiQuery = explicitMentionMatch[1].trim();
+                       console.log(`Explicit AI mention detected. Query: "${aiQuery}"`);
+                       // Load history if responding due to explicit mention
+                       userAiHistory = loadUserAiHistory(currentUsername);
                     } else {
-                        // 2. Check for potential implicit triggers: " ai " or " ai." etc.
-                        // \\b matches word boundaries - covers spaces, punctuation, start/end of string
+                        // 3. Check for implicit triggers OR if it was a forced follow-up check
                         const implicitMentionRegex = /\b(ai)\b/i;
-                         if (implicitMentionRegex.test(messageText)) {
-                            console.log(`Potential implicit AI mention detected in: "${messageText}"`);
-                             try {
-                                 // Ask AI if it thinks it's being addressed
-                                 const determination = await checkIfAiAddressed(messageText);
-                                 console.log("AI determination:", determination);
-                                 if (determination?.addressed) {
-                                     aiShouldRespond = true;
-                                     aiQuery = messageText; // Use the original message text for context
-                                     console.log(`AI determined it was addressed. Reason: ${determination.reason}. Querying with full text.`);
-                                 } else {
-                                      console.log(`AI determined it was NOT addressed. Reason: ${determination?.reason || 'N/A'}`);
-                                 }
-                             } catch (error) {
-                                 console.error("Error during AI address check:", error);
-                                 // Decide if you want to notify user or just fail silently
-                                 // safeSend(ws, { type: 'system', text: 'Error checking AI mention.' });
-                             }
+                        if (implicitMentionRegex.test(messageText) || wasFollowUpCheck) {
+                            if (wasFollowUpCheck && !implicitMentionRegex.test(messageText)) {
+                                console.log(`Checking message due to follow-up flag (no keyword): "${messageText}"`);
+                            } else {
+                                console.log(`Potential implicit AI mention detected in: "${messageText}"`);
+                            }
+                            try {
+                                // Pass history ONLY if it was a forced check (`wasFollowUpCheck` is true)
+                                const determination = await checkIfAiAddressed(
+                                    messageText,
+                                    wasFollowUpCheck ? userAiHistory : []
+                                );
+                                console.log("AI determination:", determination);
+                                if (determination?.addressed) {
+                                    aiShouldRespond = true;
+                                    aiQuery = messageText;
+                                    // History was already loaded if wasFollowUpCheck was true.
+                                    // Load history now if determination was positive based on implicit keyword alone.
+                                    if (!wasFollowUpCheck) {
+                                         userAiHistory = loadUserAiHistory(currentUsername);
+                                    }
+                                    console.log(`AI determined it was addressed. Reason: ${determination.reason}. Querying with full text.`);
+                                } else {
+                                   console.log(`AI determined it was NOT addressed. Reason: ${determination?.reason || 'N/A'}`);
+                                }
+                            } catch (error) {
+                               console.error("Error during AI address check:", error);
+                            }
                         }
                     }
 
-                    // 3. If AI should respond, get and process the response
+                    // 4. If AI should respond...
                     if (aiShouldRespond && aiQuery) {
                         console.log(`Asking AI (final query): "${aiQuery}"`);
+                        // History is now guaranteed to be in userAiHistory if needed
+                        getGeminiResponse(aiQuery, userAiHistory)
+                           .then(aiResponse => {
+                               const trimmedResponse = aiResponse?.trim();
 
-                        // --- Load user's AI history ---
-                        const userAiHistory = loadUserAiHistory(currentUsername);
-                        // --------------------------------
+                               // AI was engaged this turn (since we are in this .then block),
+                               // so set/re-set the follow-up expectation for the user's NEXT message,
+                               // regardless of whether this particular AI response was empty.
+                               console.log(`Setting follow-up expectation for user ${currentUsername} as AI was engaged this turn.`);
+                               expectingAiFollowUpUsers.add(currentUsername);
 
-                        getGeminiResponse(aiQuery, userAiHistory) // Pass history to Gemini
-                            .then(aiResponse => {
-                                const trimmedResponse = aiResponse?.trim();
+                               if (trimmedResponse) { // Only save and broadcast if AI provided a non-empty response
+                                    saveUserAiHistory(currentUsername, aiQuery, aiResponse); // Save original prompt and response
 
-                                // --- Save the interaction to history ---
-                                if (trimmedResponse) { // Only save if AI provided a non-empty response
-                                     saveUserAiHistory(currentUsername, aiQuery, aiResponse); // Save original prompt and response
-                                }
-                                // ---------------------------------------
-
-                                // (Processing logic for /me or regular message remains the same)
-                                if (trimmedResponse && trimmedResponse.toLowerCase().startsWith('/me ')) {
-                                    const actionPart = trimmedResponse.substring(4).trim();
-                                    if (actionPart) {
-                                        const aiActionMessage = createActionMessage('AI', actionPart);
-                                        console.log('AI performing action:', aiActionMessage.text);
-                                        processAndBroadcast(aiActionMessage);
-                                    } else {
-                                        console.warn('AI sent an empty /me command.');
+                                    // (Processing logic for /me or regular message remains the same)
+                                    if (trimmedResponse.toLowerCase().startsWith('/me ')) {
+                                        const actionPart = trimmedResponse.substring(4).trim();
+                                        if (actionPart) {
+                                            const aiActionMessage = createActionMessage('AI', actionPart);
+                                            console.log('AI performing action:', aiActionMessage.text);
+                                            processAndBroadcast(aiActionMessage);
+                                        } else {
+                                            console.warn('AI sent an empty /me command.');
+                                        }
+                                    } else { // Regular message (already checked trimmedResponse is not empty)
+                                        const aiMessage = {
+                                            type: 'message',
+                                            username: 'AI',
+                                            text: aiResponse // Use original (untrimmed) response
+                                        };
+                                        processAndBroadcast(aiMessage);
                                     }
-                                } else if (trimmedResponse) { // Ensure there is a response before sending
-                                    const aiMessage = {
-                                        type: 'message',
-                                        username: 'AI',
-                                        text: aiResponse // Use original (untrimmed) response
-                                    };
-                                    processAndBroadcast(aiMessage);
-                                } else {
-                                     console.log("AI returned an empty response.");
-                                }
-                            })
-                            .catch(error => {
+                               } else {
+                                    console.log("AI returned an empty response (but follow-up expectation is set).");
+                                    // No message to broadcast, but follow-up flag is now set for the user's next message.
+                               }
+                           })
+                           .catch(error => {
                                 console.error("Error getting AI response:", error);
                                 // Find the user's socket to send the error back, if possible
                                 // This requires mapping username back to ws, which we don't store directly
                                 // For simplicity, maybe just log it or send to the original ws if easily available
                                 // safeSend(ws, { type: 'system', text: 'Error: Could not get response from AI.' });
                                 console.error(`Could not send AI error message directly to user ${currentUsername} (socket not readily available here).`);
-                            });
+                                // Ensure flag is off on error
+                                expectingAiFollowUpUsers.delete(currentUsername);
+                           });
+                    } else {
+                         // If AI is NOT responding for any reason, the flag was either consumed or not set.
+                         // The console log you updated is fine.
+                         console.log(`AI not responding`);
                     }
+                } else {
+                     // AI model not configured. No AI interaction, so no follow-up flag would have been set.
+                     // The console log for this case can be removed if desired, or kept for debugging.
                 }
-                // --- End AI Trigger Logic ---
+                // --- End Updated AI Trigger Logic ---
                 break;
 
             default:
@@ -395,6 +430,9 @@ wss.on('connection', (ws) => {
         const reasonText = reason?.toString() || 'N/A';
         if (username) {
             console.log(`Client ${username} disconnected (Code: ${code}, Reason: ${reasonText})`);
+            // --- Clean up follow-up state ---
+            expectingAiFollowUpUsers.delete(username);
+            // --------------------------------
             const existed = clients.delete(ws); // Remove client
             if (existed) {
                  if (code !== 1000 || !reason?.toString().startsWith('Quit command used')) {
@@ -514,59 +552,73 @@ function broadcastUserList() {
 }
 
 // --- New function to check if AI is being addressed ---
-async function checkIfAiAddressed(messageText) {
+// Now accepts optional history for follow-up context
+async function checkIfAiAddressed(messageText, history = []) { // Add history parameter
     if (!model) {
         console.log("AI model not initialized. Skipping address check.");
         return { addressed: false, reason: "AI not available" };
     }
     try {
+        // --- Construct history string *only if checking a potential follow-up* ---
+        let historyContextForCheck = "";
+        // Include history in the prompt *only if* it was passed (i.e., for follow-up checks)
+        if (history && history.length > 0) {
+             historyContextForCheck = "Here is the recent conversation history with this user (most recent interaction last):\n";
+             history.forEach(interaction => {
+                 historyContextForCheck += `- User: "${interaction.userPrompt}"\n`;
+                 historyContextForCheck += `- AI: "${interaction.aiResponse}"\n`;
+             });
+             historyContextForCheck += "\nUse this history *only* to help determine if the *new message below* is a direct follow-up or continuation of the conversation with the AI.\n\n";
+        }
+        // --------------------------------------------------------------------
+
         // Define the desired JSON structure and instruct the model to use it.
-        const checkPrompt = `Analyze the following chat message to determine if the user is directly addressing the AI bot (you), named "ai" (e.g., asking it a question, giving it a command, mentioning it directly in a way that requests and requires a response). Consider the context of a casual group chat.  Note that the user may simply be mentioning you and/or AI to other people, so you need to discern if it's a message to you (ai), requiring a response, or about you (ai)., not requiring a response as nothing was actually explicitly directed at you.
+        const checkPrompt = `Analyze the following *new* chat message to determine if the user is directly addressing the AI bot (you), named "ai" (e.g., asking it a question, giving it a command, mentioning it directly in a way that requests and requires a response, or continuing a conversation directly with it). ${historyContextForCheck}Consider the context of a casual group chat. Note that the user may simply be mentioning you and/or AI to other people, so you need to discern if it's a message *to* you (ai), requiring a response, or *about* you (ai), not requiring a response.
 
 Respond with a JSON object matching this schema:
 {
   "addressed": boolean, // true if the AI is being directly addressed or expected to respond, false otherwise
-  "reason": string     // A brief explanation for the decision (e.g., "Direct question", "Mentioned incidentally") 
+  "reason": string     // A brief explanation for the decision (e.g., "Direct question", "Follow-up question", "Mentioned incidentally")
 }
 
-Message: "${messageText}"`;
+New Message: "${messageText}"`;
 
         // Configure the model to output JSON
         const generationConfig = { responseMimeType: "application/json" };
 
-        console.log("Sending determination prompt (JSON mode) to AI:", checkPrompt);
-        const result = await model.generateContent({ 
+        console.log("Sending determination prompt (JSON mode) to AI:", checkPrompt); // Might be long with history
+        const result = await model.generateContent({
             contents: [{role: "user", parts:[{text: checkPrompt}]}],
-            generationConfig 
+            generationConfig
         });
 
-        const response = await result.response;
-        const jsonText = response.text();
-        console.log("AI Determination Raw JSON Response:", jsonText);
+         const response = await result.response;
+         const jsonText = response.text();
+         console.log("AI Determination Raw JSON Response:", jsonText);
 
-        // Attempt to parse the JSON response (should be cleaner now)
-        try {
-            const determination = JSON.parse(jsonText);
+         // Attempt to parse the JSON response (should be cleaner now)
+         try {
+             const determination = JSON.parse(jsonText);
 
-            // Basic validation of the parsed object structure
-            if (typeof determination === 'object' && determination !== null && typeof determination.addressed === 'boolean' && typeof determination.reason === 'string') {
-                 return {
-                     addressed: determination.addressed,
-                     reason: determination.reason
-                 };
-            } else {
-                 console.error("AI determination response has invalid structure:", determination);
-                 return { addressed: false, reason: "Invalid structure in AI JSON response" };
-            }
-        } catch (parseError) {
-            console.error("Error parsing AI determination JSON:", parseError, "Raw JSON text:", jsonText);
-            return { addressed: false, reason: "Failed to parse AI JSON response" };
-        }
-    } catch (error) {
-        console.error("Error calling Gemini API for address check:", error);
-        return { addressed: false, reason: "API error during check" }; // Indicate failure
-    }
-}
+             // Basic validation of the parsed object structure
+             if (typeof determination === 'object' && determination !== null && typeof determination.addressed === 'boolean' && typeof determination.reason === 'string') {
+                  return {
+                      addressed: determination.addressed,
+                      reason: determination.reason
+                  };
+             } else {
+                  console.error("AI determination response has invalid structure:", determination);
+                  return { addressed: false, reason: "Invalid structure in AI JSON response" };
+             }
+         } catch (parseError) {
+             console.error("Error parsing AI determination JSON:", parseError, "Raw JSON text:", jsonText);
+             return { addressed: false, reason: "Failed to parse AI JSON response" };
+         }
+     } catch (error) {
+         console.error("Error calling Gemini API for address check:", error);
+         return { addressed: false, reason: "API error during check" }; // Indicate failure
+     }
+ }
 
 // --- Updated function to get response from Gemini ---
 // Now accepts user-specific AI interaction history
