@@ -147,8 +147,10 @@ const expectingAiFollowUpUsers = new Set();
 
 console.log('WebSocket server started on port 8086');
 
-wss.on('connection', (ws) => {
-    console.log('Client connected (pending identification)');
+wss.on('connection', (ws, req) => {
+    const clientIp = req.socket.remoteAddress || req.headers['x-forwarded-for']; // Get IP
+    console.log(`Client connected from IP: ${clientIp} (pending identification)`);
+    ws.clientIp = clientIp; // Temporarily store IP on ws object for later use
 
     ws.on('message', async (message) => {
         let parsedMessage;
@@ -161,7 +163,8 @@ wss.on('connection', (ws) => {
             return;
         }
 
-        const currentUsername = clients.get(ws); // Get username associated with this ws connection
+        const clientData = clients.get(ws); // Get client data (now an object)
+        const currentUsername = clientData?.username; // Get username from client data
 
         // --- Handle Command Type --- New section
         if (parsedMessage.type === 'command') {
@@ -209,6 +212,29 @@ wss.on('connection', (ws) => {
                      // Close the connection gracefully with a reason
                      ws.close(1000, `Quit command used${reason ? ': ' + reason : ''}`);
                      break;
+                 case 'whois':
+                     if (!args) {
+                         safeSend(ws, { type: 'privateSystem', text: 'Usage: /whois <username>' });
+                         return;
+                     }
+                     const targetUsername = args.trim();
+                     let foundUser = false;
+                     for (const [clientWs, clientData] of clients.entries()) {
+                         if (clientData.username && clientData.username.toLowerCase() === targetUsername.toLowerCase()) {
+                             safeSend(ws, { type: 'privateSystem', text: `User ${clientData.username} is connected from IP: ${clientData.ip}` });
+                             foundUser = true;
+                             break;
+                         }
+                     }
+                     if (!foundUser) {
+                         // Check if it's the AI they are asking about
+                         if (targetUsername.toLowerCase() === 'ai') {
+                             safeSend(ws, { type: 'privateSystem', text: 'User AI is the Artificial Intelligence of this chat.' });
+                         } else {
+                             safeSend(ws, { type: 'privateSystem', text: `User "${targetUsername}" not found.` });
+                         }
+                     }
+                     break;
                  // Add more command cases here in the future
                  default:
                      safeSend(ws, { type: 'privateSystem', text: `Unknown command '/${command}'` });
@@ -238,8 +264,8 @@ wss.on('connection', (ws) => {
 
                 // Check if username is already taken
                 let isTaken = false;
-                for (const username of clients.values()) {
-                    if (username && username.toLowerCase() === newUsername.toLowerCase()) { // Case-insensitive check
+                for (const data of clients.values()) { // Iterate over client data objects
+                    if (data.username && data.username.toLowerCase() === newUsername.toLowerCase()) { // Case-insensitive check
                         isTaken = true;
                         break;
                     }
@@ -253,10 +279,10 @@ wss.on('connection', (ws) => {
                      return;
                 }
 
-                // Store the username
-                clients.set(ws, newUsername);
-                ws.username = newUsername; // Attach to ws object for easy access
-                console.log(`Client identified as: ${newUsername}`);
+                // Store the username and IP
+                clients.set(ws, { username: newUsername, ip: ws.clientIp }); // Store as object
+                ws.username = newUsername; // Attach to ws object for easy access (username only, IP is in 'clients' map)
+                console.log(`Client identified as: ${newUsername} (IP: ${ws.clientIp})`);
 
                 // Send chat history ONLY to the newly joined client
                 sendChatHistory(ws);
@@ -264,8 +290,19 @@ wss.on('connection', (ws) => {
                 // Notify the user they are set (after history is sent)
                 safeSend(ws, { type: 'system', text: `You are connected as ${newUsername}. Chat history loaded.` });
 
-                // Send current user list ONLY to the newly joined client (can stay here or move after history)
+                // Send current user list ONLY to the newly joined client
                 sendUserList(ws);
+
+                // --- Check if last interaction before potential disconnect was with AI --- 
+                const userAiHistory = loadUserAiHistory(newUsername);
+                if (userAiHistory.length > 0) {
+                    // We don't need to check the content of the last interaction,
+                    // just that an interaction *exists*. If it does, and they are reconnecting,
+                    // their next message might be a follow-up to the AI.
+                    console.log(`User ${newUsername} reconnected and has AI interaction history. Setting follow-up expectation.`);
+                    expectingAiFollowUpUsers.add(newUsername);
+                }
+                // ------------------------------------------------------------------------
 
                 // Create join message object
                  const joinMessage = {
@@ -329,8 +366,7 @@ wss.on('connection', (ws) => {
                         if (implicitMentionRegex.test(messageText) || wasFollowUpCheck) {
                             if (wasFollowUpCheck && !implicitMentionRegex.test(messageText)) {
                                 console.log(`Checking message due to follow-up flag (no keyword): "${messageText}"`);
-                            } else {
-                                console.log(`Potential implicit AI mention detected in: "${messageText}"`);
+                            } else {                                console.log(`Potential implicit AI mention detected in: "${messageText}"`);
                             }
                             try {
                                 // Pass history ONLY if it was a forced check (`wasFollowUpCheck` is true)
@@ -426,10 +462,12 @@ wss.on('connection', (ws) => {
     });
 
     ws.on('close', (code, reason) => {
-        const username = ws.username;
+        const clientData = clients.get(ws); // Get client data
+        const username = clientData?.username; // Get username from client data
+        const ip = clientData?.ip; // Get IP from client data
         const reasonText = reason?.toString() || 'N/A';
         if (username) {
-            console.log(`Client ${username} disconnected (Code: ${code}, Reason: ${reasonText})`);
+            console.log(`Client ${username} (IP: ${ip}) disconnected (Code: ${code}, Reason: ${reasonText})`);
             // --- Clean up follow-up state ---
             expectingAiFollowUpUsers.delete(username);
             // --------------------------------
@@ -456,11 +494,13 @@ wss.on('connection', (ws) => {
     });
 
     ws.on('error', (error) => {
-        const username = ws.username;
-        console.error(`WebSocket error for client ${username || '(unidentified)'}:`, error);
+        const clientData = clients.get(ws); // Get client data
+        const username = clientData?.username; // Get username from client data
+        const ip = clientData?.ip; // Get IP from client data
+        console.error(`WebSocket error for client ${username || '(unidentified)'} (IP: ${ip || ws.clientIp || 'unknown'}):`, error);
         // Error often precedes close, but handle removal here just in case
         if (clients.has(ws)) {
-             console.log(`Removing client ${username || '(unidentified)'} due to error.`);
+             console.log(`Removing client ${username || '(unidentified)'} (IP: ${ip || ws.clientIp || 'unknown'}) due to error.`);
              clients.delete(ws);
               if (username) {
                    // Create disconnect error message object
@@ -503,14 +543,14 @@ function safeSend(ws, dataObj) {
 function broadcast(messageObj, senderWs = null) {
     const messageString = JSON.stringify(messageObj);
     console.log(`Broadcasting (excluding sender: ${!!senderWs}):`, messageString);
-    clients.forEach((username, clientWs) => {
+    clients.forEach((data, clientWs) => { // data is {username, ip}
          // Send only to identified clients and not the excluded sender
-        if (username && clientWs !== senderWs && clientWs.readyState === WebSocket.OPEN) {
+        if (data.username && clientWs !== senderWs && clientWs.readyState === WebSocket.OPEN) {
             safeSend(clientWs, messageObj); // Use safeSend now
-        } else if (!username && clientWs.readyState === WebSocket.OPEN) {
+        } else if (!data.username && clientWs.readyState === WebSocket.OPEN) {
             // console.log('Skipping broadcast to unidentified client');
         } else if (clientWs.readyState !== WebSocket.OPEN) {
-             console.log(`Skipping broadcast to non-open client ${username || '(unidentified)'}`);
+             console.log(`Skipping broadcast to non-open client ${data.username || '(unidentified)'}`);
         }
     });
 }
@@ -519,7 +559,9 @@ function broadcast(messageObj, senderWs = null) {
 // Helper function to get the list of current usernames
 function getUserList() {
     // Filter out any potentially null/undefined usernames, just in case
-    const userList = Array.from(clients.values()).filter(username => !!username);
+    const userList = Array.from(clients.values())
+        .map(data => data.username) // Get username from client data
+        .filter(username => !!username);
     userList.push("AI"); // Always include AI
     return userList.sort((a, b) => { // Custom sort: AI first, then alphabetical
         if (a === "AI") return -1;
@@ -544,8 +586,8 @@ function broadcastUserList() {
      // Broadcast the user list type message (no sender exclusion needed here)
      const messageObj = { type: 'userList', users: userList };
      const messageString = JSON.stringify(messageObj);
-     clients.forEach((username, clientWs) => {
-          if (username && clientWs.readyState === WebSocket.OPEN) { // Only send to identified, open clients
+     clients.forEach((data, clientWs) => { // data is {username, ip}
+          if (data.username && clientWs.readyState === WebSocket.OPEN) { // Only send to identified, open clients
               safeSend(clientWs, messageObj);
           }
      });
