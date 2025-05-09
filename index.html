@@ -716,7 +716,24 @@
 
 
         // --- Initialization ---
-        document.addEventListener('DOMContentLoaded', getUserNameAndConnect);
+        document.addEventListener('DOMContentLoaded', () => {
+            getUserNameAndConnect();
+
+            const messageContextMenu = document.getElementById('message-context-menu');
+
+            // Hide popover on chat scroll
+            if (chatArea && messageContextMenu) {
+                chatArea.addEventListener('scroll', () => {
+                    // hidePopover() is generally safe to call even if not open.
+                    if (typeof messageContextMenu.hidePopover === 'function') {
+                        messageContextMenu.hidePopover();
+                    } else {
+                        // Fallback for browsers not fully supporting .hidePopover()
+                        messageContextMenu.style.display = 'none';
+                    }
+                });
+            }
+        });
 
         messageInput.addEventListener('keypress', function (e) {
             if (e.key === 'Enter' && !messageInput.disabled) {
