@@ -201,6 +201,7 @@
             padding: 10px 0;
             margin: 10px 0;
             font-weight: bold;
+            max-width: 100%;
             /* Optional: add a light line or border
             border-bottom: 1px solid #eee;
             border-top: 1px solid #eee;
@@ -616,34 +617,54 @@
                     if (popover && iconElement) {
                         const iconRect = iconElement.getBoundingClientRect();
                         popover.style.position = 'fixed'; // Use fixed for positioning relative to viewport
-                        
-                        // Attempt to show it first to get its dimensions for positioning
-                        // This might cause a flicker, or not work if popover needs to be visible to get offsetHeight
-                        // A more robust way is to briefly make it visible, measure, then position.
-                        // Or, if its height is predictable, use that.
-                        // For now, let's try showing then adjusting.
-                        if (typeof popover.showPopover === 'function') {
-                            popover.showPopover();
-                        } else {
-                            // Fallback for browsers not fully supporting .showPopover() on arbitrary elements 
-                            // (though `popover` attribute should make it work)
-                            console.warn('popover.showPopover() not available, trying to manually display');
-                            popover.style.display = 'block'; 
-                        }
 
-                        // Position popover: bottom of popover aligns with top of icon
-                        // Left of popover aligns with left of icon
-
+                        // 1. Set content first
                         if (storedTimestamp) {
                           const date = new Date(parseInt(storedTimestamp));
                           popover.innerHTML = `<p style="margin:0;">${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>`;
                         } else {
-                          popover.innerHTML = `<p style="margin:0;">No timestamp available</p>`;
+                           popover.innerHTML = `<p style="margin:0;">No timestamp available</p>`;
                         }
 
-                        const popoverRect = popover.getBoundingClientRect();
-                        popover.style.left = `calc(${iconRect.left}px - ${popoverRect.width / 2}px + 10px)`;
-                        popover.style.top = (iconRect.top - popover.offsetHeight - 7) + 'px';
+                        // 2. Show the popover to allow measurement of its actual dimensions
+                        if (typeof popover.showPopover === 'function') {
+                            popover.showPopover();
+                        } else {
+                            popover.style.display = 'block'; // Fallback for browsers
+                        }
+
+                        // 3. Now get its dimensions
+                        const popoverWidth = popover.offsetWidth;
+                        const popoverHeight = popover.offsetHeight;
+
+                        // 4. Calculate desired initial position
+                        // Center popover horizontally relative to the icon, position above icon
+                        let desiredLeft = iconRect.left + (iconRect.width / 2) - (popoverWidth / 2);
+                        let desiredTop = iconRect.top - popoverHeight - 7; // 7px spacing above icon
+
+                        // 5. Boundary checks and adjustments
+                        const buffer = 10; // 10px buffer from viewport edges
+
+                        // Adjust left position
+                        if (desiredLeft + popoverWidth > window.innerWidth - buffer) {
+                            desiredLeft = window.innerWidth - popoverWidth - buffer; // Align to right edge
+                        }
+                        if (desiredLeft < buffer) {
+                            desiredLeft = buffer; // Align to left edge
+                        }
+
+                        // Adjust top position
+                        if (desiredTop < buffer) {
+                            desiredTop = buffer; // Align to top edge
+                        }
+                        // Optional: check if it goes below screen bottom (less likely with current top placement)
+                        // if (desiredTop + popoverHeight > window.innerHeight - buffer) {
+                        //     desiredTop = window.innerHeight - popoverHeight - buffer;
+                        // }
+
+                        // 6. Set popover.style.left and popover.style.top
+                        popover.style.left = desiredLeft + 'px';
+                        popover.style.top = desiredTop + 'px';
                     }
                 });
 
