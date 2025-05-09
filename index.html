@@ -613,52 +613,37 @@
                     const storedTimestamp = wrapper.dataset.timestamp;
                     const popover = document.getElementById('message-context-menu');
 
-                    if (storedTimestamp && popover && iconElement) {
-                        try {
-                            const date = new Date(parseInt(storedTimestamp));
-                            popover.innerHTML = `<p style="margin:0;">${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>`;
-
-                            // Position and show the popover
-                            const iconRect = iconElement.getBoundingClientRect();
-                            popover.style.position = 'fixed'; // Use fixed for positioning relative to viewport
-                            
-                            // Attempt to show it first to get its dimensions for positioning
-                            // This might cause a flicker, or not work if popover needs to be visible to get offsetHeight
-                            // A more robust way is to briefly make it visible, measure, then position.
-                            // Or, if its height is predictable, use that.
-                            // For now, let's try showing then adjusting.
-                            if (typeof popover.showPopover === 'function') {
-                                popover.showPopover();
-                            } else {
-                                // Fallback for browsers not fully supporting .showPopover() on arbitrary elements 
-                                // (though `popover` attribute should make it work)
-                                console.warn('popover.showPopover() not available, trying to manually display');
-                                popover.style.display = 'block'; 
-                            }
-
-                            // Position popover: bottom of popover aligns with top of icon
-                            // Left of popover aligns with left of icon
-                              popover.style.left = `calc(${iconRect.left}px - 30px)`;
-                            popover.style.top = (iconRect.top - popover.offsetHeight) + 'px';
-
-                            // Ensure it's not off-screen (very basic boundary check)
-                            if (popover.offsetLeft < 0) popover.style.left = '0px';
-                            if (popover.offsetTop < 0) popover.style.top = '0px';
-
-                        } catch (e) {
-                            console.error("Error handling popover: ", e);
-                            if (popover && typeof popover.hidePopover === 'function') popover.hidePopover();
-                            else if (popover) popover.style.display = 'none';
+                    if (popover && iconElement) {
+                        const iconRect = iconElement.getBoundingClientRect();
+                        popover.style.position = 'fixed'; // Use fixed for positioning relative to viewport
+                        
+                        // Attempt to show it first to get its dimensions for positioning
+                        // This might cause a flicker, or not work if popover needs to be visible to get offsetHeight
+                        // A more robust way is to briefly make it visible, measure, then position.
+                        // Or, if its height is predictable, use that.
+                        // For now, let's try showing then adjusting.
+                        if (typeof popover.showPopover === 'function') {
+                            popover.showPopover();
+                        } else {
+                            // Fallback for browsers not fully supporting .showPopover() on arbitrary elements 
+                            // (though `popover` attribute should make it work)
+                            console.warn('popover.showPopover() not available, trying to manually display');
+                            popover.style.display = 'block'; 
                         }
-                    } else if (popover && !storedTimestamp) {
-                        // Handle click on messages that don't have a server timestamp (e.g., initial client messages)
-                        popover.innerHTML = `<p style="margin:0;">No timestamp available</p>`;
-                        const wrapperRect = wrapper.getBoundingClientRect();
-                        popover.style.position = 'fixed';
-                        if (typeof popover.showPopover === 'function') popover.showPopover();
-                        else popover.style.display = 'block'; 
-                        popover.style.left = `calc(${wrapperRect.left}px)`;
-                        popover.style.top = (wrapperRect.top - popover.offsetHeight) + 'px';
+
+                        // Position popover: bottom of popover aligns with top of icon
+                        // Left of popover aligns with left of icon
+
+                        if (storedTimestamp) {
+                          const date = new Date(parseInt(storedTimestamp));
+                          popover.innerHTML = `<p style="margin:0;">${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>`;
+                        } else {
+                          popover.innerHTML = `<p style="margin:0;">No timestamp available</p>`;
+                        }
+
+                        const popoverRect = popover.getBoundingClientRect();
+                        popover.style.left = `calc(${iconRect.left}px - ${popoverRect.width / 2}px + 10px)`;
+                        popover.style.top = (iconRect.top - popover.offsetHeight - 7) + 'px';
                     }
                 });
 
