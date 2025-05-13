@@ -142,11 +142,17 @@ const wss = new WebSocket.Server({ port: 8086 });
 // Add connection monitoring
 let connectionCount = 0;
 const CONNECTION_TIMEOUT = 5 * 60 * 1000; // 5 minutes
-const HEARTBEAT_INTERVAL = 30 * 1000; // 30 seconds
+const HEARTBEAT_INTERVAL = 4 * 60 * 1000; // 4 minutes
+const GARBAGE_COLLECT_INTERVAL = 30 * 60 * 1000; // 30 minutes
 
 setInterval(() => {
-    console.log(`Current active connections: ${connectionCount}`);
-    console.log(`Memory usage: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`);
+    const memoryMb = Math.round(process.memoryUsage().heapUsed / 1024 / 1024)
+    if (connectionCount > 0) {
+      console.log(`Current active connections: ${connectionCount}`);
+    }
+    if (memoryMb > 8) {
+      console.log(`Memory usage: ${memoryMb}MB`);
+    }
     
     // Clean up stale connections
     clients.forEach((data, ws) => {
@@ -157,7 +163,7 @@ setInterval(() => {
         ws.isAlive = false;
         ws.ping();
     });
-}, 30000); // Check every 30 seconds
+}, GARBAGE_COLLECT_INTERVAL);
 
 // Store clients with their associated usernames: { ws => username }
 const clients = new Map();
