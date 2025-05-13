@@ -139,31 +139,8 @@ function saveUserAiHistory(username, userPrompt, aiResponse) {
 
 const wss = new WebSocket.Server({ port: 8086 });
 
-// Add connection monitoring
+// Simplified connection monitoring
 let connectionCount = 0;
-const CONNECTION_TIMEOUT = 5 * 60 * 1000; // 5 minutes
-const HEARTBEAT_INTERVAL = 4 * 60 * 1000; // 4 minutes
-const GARBAGE_COLLECT_INTERVAL = 30 * 60 * 1000; // 30 minutes
-
-setInterval(() => {
-    const memoryMb = Math.round(process.memoryUsage().heapUsed / 1024 / 1024)
-    if (connectionCount > 0) {
-      console.log(`Current active connections: ${connectionCount}`);
-    }
-    if (memoryMb > 8) {
-      console.log(`Memory usage: ${memoryMb}MB`);
-    }
-    
-    // Clean up stale connections
-    clients.forEach((data, ws) => {
-        if (ws.isAlive === false) {
-            console.log(`Cleaning up stale connection for ${data.username || 'unidentified user'}`);
-            return ws.terminate();
-        }
-        ws.isAlive = false;
-        ws.ping();
-    });
-}, GARBAGE_COLLECT_INTERVAL);
 
 // Store clients with their associated usernames: { ws => username }
 const clients = new Map();
@@ -175,31 +152,9 @@ console.log('WebSocket server started on port 8086');
 
 wss.on('connection', (ws, req) => {
     connectionCount++;
-    console.log(`New connection established. Total connections: ${connectionCount}`);
-    const clientIp = req.socket.remoteAddress || req.headers['x-forwarded-for']; // Get IP
-    console.log(`Client connected from IP: ${clientIp} (pending identification)`);
-    ws.clientIp = clientIp; // Temporarily store IP on ws object for later use
-
-    // Set up connection timeout
-    ws.isAlive = true;
-    ws.on('pong', () => {
-        ws.isAlive = true;
-    });
-    
-    // Set up heartbeat
-    const heartbeat = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-            ws.ping();
-        }
-    }, HEARTBEAT_INTERVAL);
-    
-    // Set up connection timeout
-    const timeout = setTimeout(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-            console.log(`Connection timeout for ${ws.username || 'unidentified user'}`);
-            ws.terminate();
-        }
-    }, CONNECTION_TIMEOUT);
+    const clientIp = req.socket.remoteAddress || req.headers['x-forwarded-for'];
+    console.log(`New connection established from ${clientIp} (pending username). Total connections: ${connectionCount}. Memory usage: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`);
+    ws.clientIp = clientIp;
 
     ws.on('message', async (message) => {
         let parsedMessage;
@@ -506,8 +461,6 @@ wss.on('connection', (ws, req) => {
     ws.on('close', (code, reason) => {
         connectionCount--;
         console.log(`Connection closed. Total connections: ${connectionCount}`);
-        clearInterval(heartbeat);
-        clearTimeout(timeout);
         const clientData = clients.get(ws); // Get client data
         const username = clientData?.username; // Get username from client data
         const ip = clientData?.ip; // Get IP from client data
