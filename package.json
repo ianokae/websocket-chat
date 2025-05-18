@@ -1,4 +1,8 @@
 {
+  "scripts": {
+    "upload-server": "scp -i \"simple-websocket-server.pem\" server.js ec2-user@3.72.72.221:/home/ec2-user",
+    "upload-client": "aws s3 cp index.html s3://simple-socket-chat/ --profile ian"
+  },
   "dependencies": {
     "@google/generative-ai": "^0.24.0",
     "dotenv": "^16.5.0",
