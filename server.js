@@ -433,45 +433,47 @@ async function checkIfAiAddressed(messageText) {
         return { addressed: false, reason: "AI not available" };
     }
     try {
-        // Prompt asking for JSON output about whether the AI is addressed
-        const checkPrompt = `You are an AI analyzing a message from a chat application. Determine if the user is directly addressing the AI bot named "ai" (e.g., asking it a question, giving it a command, following up, responding, mentioning it directly in a way that requires a response) in the following message. Consider the context of a casual group chat. Respond ONLY with a valid JSON object containing two keys: "addressed" (boolean: true if the AI is being directly addressed or expected to respond, false otherwise) and "reason" (string: a brief explanation for your decision, e.g., "Direct question", "Mentioned incidentally", "General statement not directed at AI"). Do not include any other text, comments, or formatting outside the JSON object.\n\nMessage: "${messageText}"`;
- 
-        console.log("Sending determination prompt to AI:", checkPrompt);
-        const result = await model.generateContent(checkPrompt);
+        // Define the desired JSON structure and instruct the model to use it.
+        const checkPrompt = `Analyze the following chat message to determine if the user is directly addressing the AI bot named "ai" (e.g., asking it a question, giving it a command, mentioning it directly in a way that requires a response). Consider the context of a casual group chat.
+
+Respond with a JSON object matching this schema:
+{
+  "addressed": boolean, // true if the AI is being directly addressed or expected to respond, false otherwise
+  "reason": string     // A brief explanation for the decision (e.g., "Direct question", "Mentioned incidentally") 
+}
+
+Message: "${messageText}"`;
+
+        // Configure the model to output JSON
+        const generationConfig = { responseMimeType: "application/json" };
+
+        console.log("Sending determination prompt (JSON mode) to AI:", checkPrompt);
+        const result = await model.generateContent({ 
+            contents: [{role: "user", parts:[{text: checkPrompt}]}],
+            generationConfig 
+        });
+
         const response = await result.response;
-        const rawText = response.text();
-        console.log("AI Determination Raw Response:", rawText);
- 
-        // Attempt to parse the JSON response
+        const jsonText = response.text();
+        console.log("AI Determination Raw JSON Response:", jsonText);
+
+        // Attempt to parse the JSON response (should be cleaner now)
         try {
-            // Find the start and end of the JSON object
-            const startIndex = rawText.indexOf('{');
-            const endIndex = rawText.lastIndexOf('}');
-
-            if (startIndex === -1 || endIndex === -1 || endIndex < startIndex) {
-                console.error("Could not find valid JSON object boundaries in AI response.", "Raw text:", rawText);
-                return { addressed: false, reason: "Malformed AI response (no JSON object found)" };
-            }
-
-            // Extract the JSON part
-            const jsonString = rawText.substring(startIndex, endIndex + 1);
-
-            // Now parse the extracted string
-            const determination = JSON.parse(jsonString);
+            const determination = JSON.parse(jsonText);
 
             // Basic validation of the parsed object structure
-            if (typeof determination === 'object' && determination !== null && typeof determination.addressed === 'boolean') {
+            if (typeof determination === 'object' && determination !== null && typeof determination.addressed === 'boolean' && typeof determination.reason === 'string') {
                  return {
                      addressed: determination.addressed,
-                     reason: determination.reason || "No reason provided." // Default reason if missing
+                     reason: determination.reason
                  };
             } else {
                  console.error("AI determination response has invalid structure:", determination);
-                 return { addressed: false, reason: "Invalid structure in AI response" };
+                 return { addressed: false, reason: "Invalid structure in AI JSON response" };
             }
         } catch (parseError) {
-            console.error("Error parsing AI determination JSON:", parseError, "Raw text:", rawText);
-            return { addressed: false, reason: "Failed to parse AI response" };
+            console.error("Error parsing AI determination JSON:", parseError, "Raw JSON text:", jsonText);
+            return { addressed: false, reason: "Failed to parse AI JSON response" };
         }
     } catch (error) {
         console.error("Error calling Gemini API for address check:", error);
