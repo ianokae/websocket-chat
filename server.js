@@ -337,17 +337,6 @@ wss.on('connection', (ws, req) => {
                 // Send current user list ONLY to the newly joined client
                 sendUserList(ws);
 
-                // --- Check if last interaction before potential disconnect was with AI --- 
-                const userAiHistory = loadUserAiHistory(newUsername);
-                if (userAiHistory.length > 0) {
-                    // We don't need to check the content of the last interaction,
-                    // just that an interaction *exists*. If it does, and they are reconnecting,
-                    // their next message might be a follow-up to the AI.
-                    console.log(`User ${newUsername} reconnected and has AI interaction history. Setting follow-up expectation.`);
-                    expectingAiFollowUpUsers.add(newUsername);
-                }
-                // ------------------------------------------------------------------------
-
                 // Create join message object
                  const joinMessage = {
                      type: 'system',
@@ -520,7 +509,7 @@ wss.on('connection', (ws, req) => {
         if (username) {
             console.log(`Client ${username} (IP: ${ip}) disconnected (Code: ${code}, Reason: ${reasonText})`);
             // --- Clean up follow-up state ---
-            expectingAiFollowUpUsers.delete(username);
+            // Removed: expectingAiFollowUpUsers.delete(username);
             // --------------------------------
             const existed = clients.delete(ws); // Remove client
             if (existed) {
