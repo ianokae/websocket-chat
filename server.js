@@ -72,7 +72,7 @@ console.log('WebSocket server started on port 8086');
 wss.on('connection', (ws) => {
     console.log('Client connected (pending identification)');
 
-    ws.on('message', (message) => {
+    ws.on('message', async (message) => {
         let parsedMessage;
         try {
             parsedMessage = JSON.parse(message.toString());
@@ -213,53 +213,88 @@ wss.on('connection', (ws) => {
                     return; // Ignore empty messages
                 }
 
-                // Normal message broadcast
+                // Normal message broadcast (broadcast user messages immediately)
                 const originalMessage = {
                     type: 'message',
                     username: currentUsername,
                     text: messageText
                 };
-                // Use helper to append history and broadcast
-                processAndBroadcast(originalMessage);
+                processAndBroadcast(originalMessage); // Broadcast user message first
 
-                // Check if message is for AI
-                if (messageText.toLowerCase().startsWith('ai ') && model) {
-                    const question = messageText.substring(3).trim(); // Get text after "AI "
-                    if (question) {
-                        console.log(`Asking AI: "${question}"`);
-                        // Get AI response asynchronously
-                        getGeminiResponse(question)
+                // --- New AI Trigger Logic ---
+                if (model) { // Only proceed if AI is configured
+                    let aiShouldRespond = false;
+                    let aiQuery = '';
+
+                    // 1. Check for explicit triggers: @ai or ai: or ai? at the start
+                    const explicitMentionMatch = messageText.match(/^@?ai[:?]?\\s+(.*)/i);
+                    if (explicitMentionMatch && explicitMentionMatch[1]) {
+                        aiShouldRespond = true;
+                        aiQuery = explicitMentionMatch[1].trim();
+                        console.log(`Explicit AI mention detected. Query: "${aiQuery}"`);
+                    } else {
+                        // 2. Check for potential implicit triggers: " ai " or " ai." etc.
+                        // \\b matches word boundaries - covers spaces, punctuation, start/end of string
+                        const implicitMentionRegex = /\b(ai)\b/i;
+                         if (implicitMentionRegex.test(messageText)) {
+                            console.log(`Potential implicit AI mention detected in: "${messageText}"`);
+                             try {
+                                 // Ask AI if it thinks it's being addressed
+                                 const determination = await checkIfAiAddressed(messageText);
+                                 console.log("AI determination:", determination);
+                                 if (determination?.addressed) {
+                                     aiShouldRespond = true;
+                                     aiQuery = messageText; // Use the original message text for context
+                                     console.log(`AI determined it was addressed. Reason: ${determination.reason}. Querying with full text.`);
+                                 } else {
+                                      console.log(`AI determined it was NOT addressed. Reason: ${determination?.reason || 'N/A'}`);
+                                 }
+                             } catch (error) {
+                                 console.error("Error during AI address check:", error);
+                                 // Decide if you want to notify user or just fail silently
+                                 // safeSend(ws, { type: 'system', text: 'Error checking AI mention.' });
+                             }
+                        }
+                    }
+
+                    // 3. If AI should respond, get and process the response
+                    if (aiShouldRespond && aiQuery) {
+                        console.log(`Asking AI (final query): "${aiQuery}"`);
+                        getGeminiResponse(aiQuery) // Use the extracted/original query
                             .then(aiResponse => {
+                                // (Processing logic for /me or regular message remains the same)
                                 const trimmedResponse = aiResponse?.trim();
                                 if (trimmedResponse && trimmedResponse.toLowerCase().startsWith('/me ')) {
-                                    const actionPart = trimmedResponse.substring(4).trim(); // Get text after "/me "
+                                    const actionPart = trimmedResponse.substring(4).trim();
                                     if (actionPart) {
-                                        // Use helpers to create and process the AI action message
                                         const aiActionMessage = createActionMessage('AI', actionPart);
                                         console.log('AI performing action:', aiActionMessage.text);
-                                        processAndBroadcast(aiActionMessage); // Broadcast action to everyone
+                                        processAndBroadcast(aiActionMessage);
                                     } else {
-                                        // Handle empty /me command from AI? Log or ignore.
                                         console.warn('AI sent an empty /me command.');
                                     }
-                                } else {
-                                    // Treat as regular message
+                                } else if (trimmedResponse) { // Ensure there is a response before sending
                                     const aiMessage = {
                                         type: 'message',
                                         username: 'AI',
-                                        text: aiResponse // Use original (untrimmed) response here
+                                        text: aiResponse // Use original (untrimmed) response
                                     };
-                                    // Use helper to append history and broadcast
                                     processAndBroadcast(aiMessage);
+                                } else {
+                                     console.log("AI returned an empty response.");
                                 }
                             })
                             .catch(error => {
                                 console.error("Error getting AI response:", error);
-                                // Optionally notify the user about the error
-                                safeSend(ws, { type: 'system', text: 'Error: Could not get response from AI.' });
+                                // Find the user's socket to send the error back, if possible
+                                // This requires mapping username back to ws, which we don't store directly
+                                // For simplicity, maybe just log it or send to the original ws if easily available
+                                // safeSend(ws, { type: 'system', text: 'Error: Could not get response from AI.' });
+                                console.error(`Could not send AI error message directly to user ${currentUsername} (socket not readily available here).`);
                             });
                     }
                 }
+                // --- End AI Trigger Logic ---
                 break;
 
             default:
@@ -391,15 +426,70 @@ function broadcastUserList() {
      });
 }
 
-// --- New function to get response from Gemini ---
+// --- New function to check if AI is being addressed ---
+async function checkIfAiAddressed(messageText) {
+    if (!model) {
+        console.log("AI model not initialized. Skipping address check.");
+        return { addressed: false, reason: "AI not available" };
+    }
+    try {
+        // Prompt asking for JSON output about whether the AI is addressed
+        const checkPrompt = `You are an AI analyzing a message from a chat application. Determine if the user is directly addressing the AI bot named "ai" (e.g., asking it a question, giving it a command, following up, responding, mentioning it directly in a way that requires a response) in the following message. Consider the context of a casual group chat. Respond ONLY with a valid JSON object containing two keys: "addressed" (boolean: true if the AI is being directly addressed or expected to respond, false otherwise) and "reason" (string: a brief explanation for your decision, e.g., "Direct question", "Mentioned incidentally", "General statement not directed at AI"). Do not include any other text, comments, or formatting outside the JSON object.\n\nMessage: "${messageText}"`;
+ 
+        console.log("Sending determination prompt to AI:", checkPrompt);
+        const result = await model.generateContent(checkPrompt);
+        const response = await result.response;
+        const rawText = response.text();
+        console.log("AI Determination Raw Response:", rawText);
+ 
+        // Attempt to parse the JSON response
+        try {
+            // Find the start and end of the JSON object
+            const startIndex = rawText.indexOf('{');
+            const endIndex = rawText.lastIndexOf('}');
+
+            if (startIndex === -1 || endIndex === -1 || endIndex < startIndex) {
+                console.error("Could not find valid JSON object boundaries in AI response.", "Raw text:", rawText);
+                return { addressed: false, reason: "Malformed AI response (no JSON object found)" };
+            }
+
+            // Extract the JSON part
+            const jsonString = rawText.substring(startIndex, endIndex + 1);
+
+            // Now parse the extracted string
+            const determination = JSON.parse(jsonString);
+
+            // Basic validation of the parsed object structure
+            if (typeof determination === 'object' && determination !== null && typeof determination.addressed === 'boolean') {
+                 return {
+                     addressed: determination.addressed,
+                     reason: determination.reason || "No reason provided." // Default reason if missing
+                 };
+            } else {
+                 console.error("AI determination response has invalid structure:", determination);
+                 return { addressed: false, reason: "Invalid structure in AI response" };
+            }
+        } catch (parseError) {
+            console.error("Error parsing AI determination JSON:", parseError, "Raw text:", rawText);
+            return { addressed: false, reason: "Failed to parse AI response" };
+        }
+    } catch (error) {
+        console.error("Error calling Gemini API for address check:", error);
+        return { addressed: false, reason: "API error during check" }; // Indicate failure
+    }
+}
+
+// --- Updated function to get response from Gemini ---
+// (Prompt is slightly simplified as the trigger is now handled before calling this)
 async function getGeminiResponse(prompt) {
     if (!model) {
         console.log("AI model not initialized. Skipping Gemini request.");
         return "Sorry, the AI is currently unavailable.";
     }
     try {
-        // Add instructions to the prompt for chat-like responses
-        const finalPrompt = `You are an AI assistant in a simple WebSocket chat group application (like IRC) built by and for youth who are inspired by technology and creativity. Keep your single-line responses concise and conversational, ideally 1-4 sentences. Do not use markdown or special formatting. You can also perform actions by starting your *first sentence*, *first characters* response with "/me " (e.g., "/me looks thoughtful."). The user's message is: ${prompt}`;
+        // Updated prompt: Assumes the 'prompt' is the core question/statement for the AI.
+        const finalPrompt = `You are an AI assistant in a simple WebSocket chat group application (like IRC) built by and for youth who are inspired by technology and creativity. Keep your single-line responses concise and conversational, ideally 1-4 sentences. Do not use markdown or special formatting. You can also perform actions by starting your *entire response text* with "/me " (e.g., "/me looks thoughtful."). Respond to the following user message:\n\n"${prompt}"`;
+ 
         console.log("Sending final prompt to AI:", finalPrompt); // Log the full prompt
         const result = await model.generateContent(finalPrompt);
         const response = await result.response;
