@@ -173,13 +173,13 @@
             color: #888;
             cursor: pointer;
             padding: 0 8px;   /* Spacing around dots, outside the bubble */
-            visibility: hidden; /* Hidden by default */
+            display: none;    /* Changed from visibility: hidden */
             line-height: 1;   /* Prevents extra vertical space from font */
         }
 
         /* Show options icon on hover of the message wrapper */
         .message-wrapper:hover .message-options {
-            visibility: visible;
+            display: inline-block; /* Changed from visibility: visible */
         }
         /* END NEW styles */
 
@@ -510,37 +510,23 @@
 
         function appendMessage(messageHTML, typeClass = '') {
             const messageElement = document.createElement('p');
-            let addDots = false;
+            let addDots = true; // Dots for (almost) all messages by default
             let isMyMsg = false;
-            let isAction = false; // To specifically exclude action messages from getting dots
 
-            // Determine message type and if dots should be added
-            if (Array.isArray(typeClass)) {
-                messageElement.classList.add(...typeClass);
-                if (typeClass.includes('action')) {
-                    isAction = true;
-                }
-                // Only add dots if it's not an action message
-                if (!isAction) {
-                    if (typeClass.includes('my-message')) { 
-                        addDots = true; 
-                        isMyMsg = true; 
-                    }
-                    else if (typeClass.includes('other-message')) { 
-                        addDots = true; 
-                    }
-                }
-            } else if (typeof typeClass === 'string' && typeClass) {
-                messageElement.classList.add(typeClass);
-                // `typeClass` could be 'system', 'private-system', 'my-message', or 'other-message'
-                if (typeClass === 'my-message') { 
-                    addDots = true; 
-                    isMyMsg = true; 
-                }
-                else if (typeClass === 'other-message') { 
-                    addDots = true; 
-                }
+            // Standardize typeClass to an array for easier checking
+            const originalTypeClasses = Array.isArray(typeClass) ? [...typeClass] : (typeClass ? [typeClass] : []);
+            messageElement.classList.add(...originalTypeClasses);
+
+            if (originalTypeClasses.includes('my-message')) {
+                isMyMsg = true;
             }
+
+            // Future: If there are specific message types that should *never* get dots,
+            // an explicit exclusion could be added here:
+            // if (originalTypeClasses.includes('some-very-special-system-type')) {
+            //     addDots = false;
+            // }
+
             messageElement.innerHTML = messageHTML; // Use innerHTML for <strong> tags etc.
 
              const shouldScroll = chatArea.scrollTop + chatArea.clientHeight >= chatArea.scrollHeight - 20; // Check if near bottom
@@ -548,10 +534,13 @@
             if (addDots) {
                 const messageWrapper = document.createElement('div');
                 messageWrapper.classList.add('message-wrapper');
+
                 if (isMyMsg) {
+                    // This will apply to p.my-message and p.action.my-message
                     messageWrapper.classList.add('my-message-wrapper');
                 } else {
-                    messageWrapper.classList.add('other-message-wrapper'); // Assumes other-message if addDots is true & not myMsg
+                    // This will apply to p.other-message, p.action.other-message, p.system, p.private-system
+                    messageWrapper.classList.add('other-message-wrapper');
                 }
 
                 const optionsIcon = document.createElement('span');
@@ -563,13 +552,13 @@
                     messageWrapper.appendChild(optionsIcon);
                     messageWrapper.appendChild(messageElement);
                 } else {
-                    // Other's message: [bubble] [dots]
+                    // Other's message (or system/action/private): [bubble] [dots]
                     messageWrapper.appendChild(messageElement);
                     messageWrapper.appendChild(optionsIcon);
                 }
                 chatArea.appendChild(messageWrapper);
             } else {
-                // For system, action, private-system messages, append the p element directly
+                // Fallback for messages explicitly excluded from having dots
                 chatArea.appendChild(messageElement);
             }
 
