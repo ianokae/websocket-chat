@@ -192,6 +192,22 @@
 
         /* END NEW styles */
 
+        /* Style for date separators */
+        #chat-area p.date-separator {
+            text-align: center;
+            font-size: 0.8em;
+            color: #888;
+            background-color: transparent;
+            padding: 10px 0;
+            margin: 10px 0;
+            font-weight: bold;
+            /* Optional: add a light line or border
+            border-bottom: 1px solid #eee;
+            border-top: 1px solid #eee;
+            */
+        }
+        /* END Style for date separators */
+
         #chat-area p.action { /* Style for /me action messages */
             font-style: italic;
             color: #6a1b9a; /* Distinct color, maybe purple? */
@@ -354,6 +370,7 @@
         const userCountElement = document.getElementById('user-count');
         let websocket;
         let username; // Variable to store the username
+        let lastMessageDateString = null; // To track the date of the last message
         const userListContainer = document.getElementById('user-list-container'); // Get user list container
         const userListToggle = document.getElementById('user-list-toggle'); // Get toggle button
 
@@ -382,8 +399,9 @@
             // Use window.location.hostname for dynamic local/deployed detection if needed
             // const wsHost = window.location.hostname || 'localhost';
             // websocket = new WebSocket(`ws://${wsHost}:8086`);
-            //websocket = new WebSocket('ws://3.72.72.221:8086');
-            websocket = new WebSocket('ws://10.0.0.27:8086');
+            websocket = new WebSocket('ws://3.72.72.221:8086');
+            //websocket = new WebSocket('ws://10.0.0.27:8086');
+            lastMessageDateString = null; // Reset last message date on new connection/reconnection
 
 
             websocket.onopen = () => {
@@ -422,6 +440,7 @@
                         case 'chatHistory':
                              console.log(`Received history with ${data.history.length} messages.`);
                              chatArea.innerHTML = '';
+                             lastMessageDateString = null; // Reset for history processing
                              data.history.forEach(msg => {
                                  if (msg.type === 'message') {
                                      const messageClass = msg.username === username ? 'my-message' : 'other-message';
@@ -517,7 +536,39 @@
             }
         }
 
+        function getFormattedDateSeparator(timestamp) {
+            if (!timestamp) return null;
+            const date = new Date(timestamp);
+            const today = new Date();
+            const yesterday = new Date(today);
+            yesterday.setDate(today.getDate() - 1);
+
+            if (date.toDateString() === today.toDateString()) {
+                return "Today";
+            }
+            if (date.toDateString() === yesterday.toDateString()) {
+                return "Yesterday";
+            }
+            return date.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+        }
+
         function appendMessage(messageHTML, typeClass = '', timestamp = null) {
+            const shouldScroll = chatArea.scrollTop + chatArea.clientHeight >= chatArea.scrollHeight - 20; // Check if near bottom
+
+            if (timestamp) {
+                const currentDateString = new Date(timestamp).toDateString();
+                if (lastMessageDateString !== currentDateString) {
+                    const separatorText = getFormattedDateSeparator(timestamp);
+                    if (separatorText) {
+                        const separatorElement = document.createElement('p');
+                        separatorElement.classList.add('date-separator');
+                        separatorElement.textContent = separatorText;
+                        chatArea.appendChild(separatorElement);
+                    }
+                    lastMessageDateString = currentDateString;
+                }
+            }
+
             const messageElement = document.createElement('p');
             let addDots = true; // Dots for (almost) all messages by default
             let isMyMsg = false;
@@ -537,8 +588,6 @@
             // }
 
             messageElement.innerHTML = messageHTML; // Use innerHTML for <strong> tags etc.
-
-             const shouldScroll = chatArea.scrollTop + chatArea.clientHeight >= chatArea.scrollHeight - 20; // Check if near bottom
 
             if (addDots) {
                 const messageWrapper = document.createElement('div');
