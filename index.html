@@ -305,10 +305,18 @@
 
             websocket.onclose = (event) => {
                 const reason = event.reason || `code ${event.code}`;
-                appendMessage(`Disconnected: ${reason}. Attempting to reconnect...`, "system");
-                disableInput();
-                updateUserList([]); // Clear user list on disconnect
-                setTimeout(connectWebSocket, 3000);
+                // Check if the closure was initiated by the user's /quit command (code 1000)
+                if (event.code === 1000 && event.reason?.startsWith('Quit command used')) {
+                    appendMessage(`You have disconnected: ${reason}`, "system");
+                    disableInput();
+                    updateUserList([]); // Clear user list
+                } else {
+                    // Handle other disconnects (server restart, network issue, etc.)
+                    appendMessage(`Disconnected: ${reason}. Attempting to reconnect...`, "system");
+                    disableInput();
+                    updateUserList([]); // Clear user list on disconnect
+                    setTimeout(connectWebSocket, 3000);
+                }
             };
 
             websocket.onerror = (errorEvent) => {
