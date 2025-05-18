@@ -126,7 +126,7 @@
             border-radius: 8px;
             word-wrap: break-word;
             max-width: 90%; /* Prevent messages from taking full width */
-            clear: both; /* Ensure floats don't overlap */
+            /* clear: both;  Removed as flex wrappers will handle layout */
         }
         #chat-area p.system {
              font-style: italic;
@@ -134,16 +134,15 @@
              background-color: #eee;
              text-align: center;
              max-width: 100%;
+             width: 100%;
         }
          #chat-area p.my-message {
-             float: right; /* Align own messages to the right */
-             margin-left: 10%; /* Indent user's own messages */
+             /* float: right; Removed */
              background-color: #d1ecf1; /* Light blue background */
              text-align: right;
          }
          #chat-area p.other-message {
-              float: left; /* Align others' messages to the left */
-              margin-right: 10%; /* Indent other messages */
+              /* float: left; Removed */
               background-color: #e2e3e5; /* Light grey background */
               text-align: left;
          }
@@ -157,6 +156,58 @@
             display: table;
             clear: both;
         }
+
+        /* NEW styles for message wrapper and options icon */
+        .message-wrapper {
+            position: relative;
+            display: flex;
+            align-items: center; /* Vertically center icon and bubble */
+            /* margin for the wrapper can be added if needed, but p already has margin */
+        }
+
+        .my-message-wrapper {
+            justify-content: flex-end; /* Aligns flex items (dots and bubble) to the right */
+        }
+        /* .other-message-wrapper will use default justify-content: flex-start */
+
+        .message-options {
+            font-size: 1.1em; /* Adjust size of the dots icon */
+            color: #888;
+            cursor: pointer;
+            padding: 0 8px;   /* Spacing around dots, outside the bubble */
+            display: none;    /* Changed from visibility: hidden */
+            line-height: 1;   /* Prevents extra vertical space from font */
+        }
+
+        /* Show options icon on hover of the message wrapper */
+        .message-wrapper:hover .message-options {
+            display: inline-block; /* Changed from visibility: visible */
+        }
+
+        .message-wrapper:hover .system + .message-options {
+          position: absolute;
+          right: 0;
+          display: block;
+        }
+
+        /* END NEW styles */
+
+        /* Style for date separators */
+        #chat-area p.date-separator {
+            text-align: center;
+            font-size: 0.8em;
+            color: #888;
+            background-color: transparent;
+            padding: 10px 0;
+            margin: 10px 0;
+            font-weight: bold;
+            max-width: 100%;
+            /* Optional: add a light line or border
+            border-bottom: 1px solid #eee;
+            border-top: 1px solid #eee;
+            */
+        }
+        /* END Style for date separators */
 
         #chat-area p.action { /* Style for /me action messages */
             font-style: italic;
@@ -270,6 +321,19 @@
 
         }
 
+        /* Styles for the Popover Context Menu */
+        #message-context-menu {
+            background-color: #fff;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            padding: 8px 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+            font-size: 0.9em;
+            margin: 0;
+            /* position: fixed; will be set by JS if needed, popover handles its own layer */
+            /* min-width: 150px; /* Optional: give it some default width */
+        }
+
     </style>
 </head>
 <body>
@@ -307,6 +371,7 @@
         const userCountElement = document.getElementById('user-count');
         let websocket;
         let username; // Variable to store the username
+        let lastMessageDateString = null; // To track the date of the last message
         const userListContainer = document.getElementById('user-list-container'); // Get user list container
         const userListToggle = document.getElementById('user-list-toggle'); // Get toggle button
 
@@ -336,7 +401,8 @@
             // const wsHost = window.location.hostname || 'localhost';
             // websocket = new WebSocket(`ws://${wsHost}:8086`);
             websocket = new WebSocket('ws://3.72.72.221:8086');
-            //websocket = new WebSocket('ws://10.0.0.3:8086');
+            //websocket = new WebSocket('ws://10.0.0.27:8086');
+            lastMessageDateString = null; // Reset last message date on new connection/reconnection
 
 
             websocket.onopen = () => {
@@ -358,63 +424,51 @@
                     switch(data.type) {
                         case 'message':
                             const messageClass = data.username === username ? 'my-message' : 'other-message';
-                            // Avoid displaying sender's name if it's their own message for cleaner look
                             const displayName = data.username === username ? 'You' : data.username;
-                            appendMessage(`<strong>${displayName}:</strong> ${data.text}`, messageClass);
+                            appendMessage(`<strong>${displayName}:</strong> ${data.text}`, messageClass, data.timestamp);
                             break;
                         case 'system':
-                            appendMessage(data.text, 'system');
-                            // If system message indicates an error setting username, handle it
+                            appendMessage(data.text, 'system', data.timestamp);
                             if (data.text.startsWith("Error: Username")) {
                                  disableInput();
-                                 // Maybe prompt again or inform user to refresh
                                  alert(data.text + "\nPlease refresh and try a different name.");
-                                 websocket.close(); // Close the problematic connection
-                            } else if (data.text.includes("Chat history loaded")) {
-                                // This indicates history *should* have been received and processed just before this message.
-                                // We can now be sure the initial connection messages are less likely to be immediately cleared.
-                                // Optional: Could add a small delay or flag if needed, but usually processing order is fine.
+                                 websocket.close();
                             }
                             break;
                         case 'userList':
-                            updateUserList(data.users);
+                            updateUserList(data.users); // User list messages don't need individual timestamps for display typically
                             break;
-                        case 'chatHistory': // Handle the chat history
+                        case 'chatHistory':
                              console.log(`Received history with ${data.history.length} messages.`);
-                             chatArea.innerHTML = ''; // Clear any existing messages (like "Connecting...")
+                             chatArea.innerHTML = '';
+                             lastMessageDateString = null; // Reset for history processing
                              data.history.forEach(msg => {
                                  if (msg.type === 'message') {
                                      const messageClass = msg.username === username ? 'my-message' : 'other-message';
                                      const displayName = msg.username === username ? 'You' : msg.username;
-                                     appendMessage(`<strong>${displayName}:</strong> ${msg.text}`, messageClass);
+                                     appendMessage(`<strong>${displayName}:</strong> ${msg.text}`, messageClass, msg.timestamp);
                                  } else if (msg.type === 'system') {
-                                     appendMessage(msg.text, 'system');
+                                     appendMessage(msg.text, 'system', msg.timestamp);
                                  } else if (msg.type === 'action') {
-                                     // Determine alignment based on who sent the action in the history
                                      const actionClass = msg.username?.toLowerCase() === username?.toLowerCase() ? 'my-message' : 'other-message';
-                                     // Pass both the alignment class and the specific action class
-                                     appendMessage(msg.text, ['action', actionClass]);
+                                     appendMessage(msg.text, ['action', actionClass], msg.timestamp);
                                  }
-                                 // Add handling for other message types if necessary
                              });
-                             // Scroll to bottom after loading history
                              chatArea.scrollTop = chatArea.scrollHeight;
                              break;
-                         case 'privateSystem': // Handle private system messages from server
-                             appendMessage(data.text, 'private-system'); // Use the new distinct class
+                         case 'privateSystem':
+                             appendMessage(data.text, 'private-system', data.timestamp);
                              break;
-                        case 'action': // Handle /me action messages
-                             // Use case-insensitive comparison for robustness
+                        case 'action':
                              const actionClass = data.username?.toLowerCase() === username?.toLowerCase() ? 'my-message' : 'other-message';
-                             // Pass both the alignment class and the specific action class
-                             appendMessage(data.text, ['action', actionClass]);
+                             appendMessage(data.text, ['action', actionClass], data.timestamp);
                               break;
                          default:
-                            appendMessage(`Received unknown format: ${event.data}`, 'system');
+                            appendMessage(`Received unknown format: ${event.data}`, 'system', Date.now()); // Or null if no relevant timestamp
                     }
                 } catch (e) {
                     console.error("Failed to parse message or invalid message format:", event.data, e);
-                    appendMessage(`Received raw: ${event.data}`, 'system');
+                    appendMessage(`Received raw: ${event.data}`, 'system', Date.now()); // Or null
                 }
             };
 
@@ -483,19 +537,169 @@
             }
         }
 
-        function appendMessage(messageHTML, typeClass = '') {
-            const messageElement = document.createElement('p');
-            // Handle single class string or array of classes
-            if (Array.isArray(typeClass)) {
-                messageElement.classList.add(...typeClass);
-            } else if (typeClass) {
-                messageElement.classList.add(typeClass);
+        function getFormattedDateSeparator(timestamp) {
+            if (!timestamp) return null;
+            const date = new Date(timestamp);
+            const today = new Date();
+            const yesterday = new Date(today);
+            yesterday.setDate(today.getDate() - 1);
+
+            if (date.toDateString() === today.toDateString()) {
+                return "Today";
             }
+            if (date.toDateString() === yesterday.toDateString()) {
+                return "Yesterday";
+            }
+            return date.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+        }
+
+        function appendMessage(messageHTML, typeClass = '', timestamp = null) {
+            const shouldScroll = chatArea.scrollTop + chatArea.clientHeight >= chatArea.scrollHeight - 20; // Check if near bottom
+
+            if (timestamp) {
+                const currentDateString = new Date(timestamp).toDateString();
+                if (lastMessageDateString !== currentDateString) {
+                    const separatorText = getFormattedDateSeparator(timestamp);
+                    if (separatorText) {
+                        const separatorElement = document.createElement('p');
+                        separatorElement.classList.add('date-separator');
+                        separatorElement.textContent = separatorText;
+                        chatArea.appendChild(separatorElement);
+                    }
+                    lastMessageDateString = currentDateString;
+                }
+            }
+
+            const messageElement = document.createElement('p');
+            let addDots = true; // Dots for (almost) all messages by default
+            let isMyMsg = false;
+
+            // Standardize typeClass to an array for easier checking
+            const originalTypeClasses = Array.isArray(typeClass) ? [...typeClass] : (typeClass ? [typeClass] : []);
+            messageElement.classList.add(...originalTypeClasses);
+
+            if (originalTypeClasses.includes('my-message')) {
+                isMyMsg = true;
+            }
+
+            // Future: If there are specific message types that should *never* get dots,
+            // an explicit exclusion could be added here:
+            // if (originalTypeClasses.includes('some-very-special-system-type')) {
+            //     addDots = false;
+            // }
+
             messageElement.innerHTML = messageHTML; // Use innerHTML for <strong> tags etc.
 
-             const shouldScroll = chatArea.scrollTop + chatArea.clientHeight >= chatArea.scrollHeight - 20; // Check if near bottom
+            if (addDots) {
+                const messageWrapper = document.createElement('div');
+                messageWrapper.classList.add('message-wrapper');
 
-            chatArea.appendChild(messageElement);
+                if (isMyMsg) {
+                    messageWrapper.classList.add('my-message-wrapper');
+                } else {
+                    messageWrapper.classList.add('other-message-wrapper');
+                }
+
+                if (timestamp) { // Store timestamp if available
+                    messageWrapper.dataset.timestamp = timestamp;
+                }
+
+                const optionsIcon = document.createElement('span');
+                optionsIcon.classList.add('message-options');
+                optionsIcon.innerHTML = '&#8942;'; // Vertical ellipsis HTML entity (⋮)
+
+                messageWrapper.addEventListener('click', (event) => {
+                    const wrapper = event.currentTarget;
+                    const iconElement = wrapper.querySelector('.message-options');
+                    const storedTimestamp = wrapper.dataset.timestamp;
+                    const popover = document.getElementById('message-context-menu');
+
+                    if (popover && iconElement) {
+                        const iconRect = iconElement.getBoundingClientRect();
+                        popover.style.position = 'fixed'; // Use fixed for positioning relative to viewport
+
+                        // 1. Set content first
+                        if (storedTimestamp) {
+                          const date = new Date(parseInt(storedTimestamp));
+                          popover.innerHTML = `<p style="margin:0;">${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>`;
+                        } else {
+                           popover.innerHTML = `<p style="margin:0;">No timestamp available</p>`;
+                        }
+
+                        // 2. Show the popover to allow measurement of its actual dimensions
+                        if (typeof popover.showPopover === 'function') {
+                            popover.showPopover();
+                        } else {
+                            popover.style.display = 'block'; // Fallback for browsers
+                        }
+
+                        // 3. Now get its dimensions
+                        const popoverWidth = popover.offsetWidth;
+                        const popoverHeight = popover.offsetHeight;
+
+                        // 4. Calculate desired initial position
+                        // Center popover horizontally relative to the icon, position above icon
+                        let desiredLeft = iconRect.left + (iconRect.width / 2) - (popoverWidth / 2);
+                        let desiredTop = iconRect.top - popoverHeight - 7; // 7px spacing above icon
+
+                        // 5. Boundary checks and adjustments
+                        const buffer = 10; // 10px buffer from viewport edges
+
+                        // Adjust left position
+                        if (desiredLeft + popoverWidth > window.innerWidth - buffer) {
+                            desiredLeft = window.innerWidth - popoverWidth - buffer; // Align to right edge
+                        }
+                        if (desiredLeft < buffer) {
+                            desiredLeft = buffer; // Align to left edge
+                        }
+
+                        // Adjust top position
+                        if (desiredTop < buffer) {
+                            desiredTop = buffer; // Align to top edge
+                        }
+                        // Optional: check if it goes below screen bottom (less likely with current top placement)
+                        // if (desiredTop + popoverHeight > window.innerHeight - buffer) {
+                        //     desiredTop = window.innerHeight - popoverHeight - buffer;
+                        // }
+
+                        // 6. Set popover.style.left and popover.style.top
+                        popover.style.left = desiredLeft + 'px';
+                        popover.style.top = desiredTop + 'px';
+                    }
+                });
+
+                // Add mouseout listener to hide the popover
+                messageWrapper.addEventListener('mouseout', (event) => {
+                    // Check if the mouse is truly leaving the wrapper and not just entering a child like the popover itself
+                    // This check might not be strictly necessary if popover.hidePopover() is idempotent
+                    // and if the popover is not a child of the messageWrapper in the DOM.
+                    if (!event.currentTarget.contains(event.relatedTarget)) {
+                        const popover = document.getElementById('message-context-menu');
+                        if (popover && typeof popover.hidePopover === 'function') {
+                            // Check if popover is actually open before trying to hide
+                            // A common way to check for popover visibility is to see if it has the :popover-open pseudo-class
+                            // or check for an open attribute if it's being used. 
+                            // However, directly calling hidePopover() is often safe.
+                            popover.hidePopover(); 
+                        } else if (popover) {
+                            // Fallback hide
+                            popover.style.display = 'none';
+                        }
+                    }
+                });
+
+                if (isMyMsg) {
+                    messageWrapper.appendChild(optionsIcon);
+                    messageWrapper.appendChild(messageElement);
+                } else {
+                    messageWrapper.appendChild(messageElement);
+                    messageWrapper.appendChild(optionsIcon);
+                }
+                chatArea.appendChild(messageWrapper);
+            } else {
+                // Fallback for messages explicitly excluded from having dots
+                chatArea.appendChild(messageElement);
+            }
 
             // Scroll to bottom only if user was already near the bottom
             if(shouldScroll) {
@@ -533,7 +737,24 @@
 
 
         // --- Initialization ---
-        document.addEventListener('DOMContentLoaded', getUserNameAndConnect);
+        document.addEventListener('DOMContentLoaded', () => {
+            getUserNameAndConnect();
+
+            const messageContextMenu = document.getElementById('message-context-menu');
+
+            // Hide popover on chat scroll
+            if (chatArea && messageContextMenu) {
+                chatArea.addEventListener('scroll', () => {
+                    // hidePopover() is generally safe to call even if not open.
+                    if (typeof messageContextMenu.hidePopover === 'function') {
+                        messageContextMenu.hidePopover();
+                    } else {
+                        // Fallback for browsers not fully supporting .hidePopover()
+                        messageContextMenu.style.display = 'none';
+                    }
+                });
+            }
+        });
 
         messageInput.addEventListener('keypress', function (e) {
             if (e.key === 'Enter' && !messageInput.disabled) {
@@ -557,5 +778,8 @@
          });
 
     </script>
+    <div id="message-context-menu" popover>
+        <!-- Content will be set by JavaScript -->
+    </div>
 </body>
 </html>
