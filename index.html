@@ -134,6 +134,7 @@
              background-color: #eee;
              text-align: center;
              max-width: 100%;
+             width: 100%;
         }
          #chat-area p.my-message {
              /* float: right; Removed */
@@ -295,6 +296,19 @@
 
         }
 
+        /* Styles for the Popover Context Menu */
+        #message-context-menu {
+            background-color: #fff;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            padding: 8px 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+            font-size: 0.9em;
+            margin: 0;
+            /* position: fixed; will be set by JS if needed, popover handles its own layer */
+            /* min-width: 150px; /* Optional: give it some default width */
+        }
+
     </style>
 </head>
 <body>
@@ -361,7 +375,7 @@
             // const wsHost = window.location.hostname || 'localhost';
             // websocket = new WebSocket(`ws://${wsHost}:8086`);
             //websocket = new WebSocket('ws://3.72.72.221:8086');
-            websocket = new WebSocket('ws://10.0.0.18:8086');
+            websocket = new WebSocket('ws://10.0.0.27:8086');
 
 
             websocket.onopen = () => {
@@ -383,63 +397,50 @@
                     switch(data.type) {
                         case 'message':
                             const messageClass = data.username === username ? 'my-message' : 'other-message';
-                            // Avoid displaying sender's name if it's their own message for cleaner look
                             const displayName = data.username === username ? 'You' : data.username;
-                            appendMessage(`<strong>${displayName}:</strong> ${data.text}`, messageClass);
+                            appendMessage(`<strong>${displayName}:</strong> ${data.text}`, messageClass, data.timestamp);
                             break;
                         case 'system':
-                            appendMessage(data.text, 'system');
-                            // If system message indicates an error setting username, handle it
+                            appendMessage(data.text, 'system', data.timestamp);
                             if (data.text.startsWith("Error: Username")) {
                                  disableInput();
-                                 // Maybe prompt again or inform user to refresh
                                  alert(data.text + "\nPlease refresh and try a different name.");
-                                 websocket.close(); // Close the problematic connection
-                            } else if (data.text.includes("Chat history loaded")) {
-                                // This indicates history *should* have been received and processed just before this message.
-                                // We can now be sure the initial connection messages are less likely to be immediately cleared.
-                                // Optional: Could add a small delay or flag if needed, but usually processing order is fine.
+                                 websocket.close();
                             }
                             break;
                         case 'userList':
-                            updateUserList(data.users);
+                            updateUserList(data.users); // User list messages don't need individual timestamps for display typically
                             break;
-                        case 'chatHistory': // Handle the chat history
+                        case 'chatHistory':
                              console.log(`Received history with ${data.history.length} messages.`);
-                             chatArea.innerHTML = ''; // Clear any existing messages (like "Connecting...")
+                             chatArea.innerHTML = '';
                              data.history.forEach(msg => {
                                  if (msg.type === 'message') {
                                      const messageClass = msg.username === username ? 'my-message' : 'other-message';
                                      const displayName = msg.username === username ? 'You' : msg.username;
-                                     appendMessage(`<strong>${displayName}:</strong> ${msg.text}`, messageClass);
+                                     appendMessage(`<strong>${displayName}:</strong> ${msg.text}`, messageClass, msg.timestamp);
                                  } else if (msg.type === 'system') {
-                                     appendMessage(msg.text, 'system');
+                                     appendMessage(msg.text, 'system', msg.timestamp);
                                  } else if (msg.type === 'action') {
-                                     // Determine alignment based on who sent the action in the history
                                      const actionClass = msg.username?.toLowerCase() === username?.toLowerCase() ? 'my-message' : 'other-message';
-                                     // Pass both the alignment class and the specific action class
-                                     appendMessage(msg.text, ['action', actionClass]);
+                                     appendMessage(msg.text, ['action', actionClass], msg.timestamp);
                                  }
-                                 // Add handling for other message types if necessary
                              });
-                             // Scroll to bottom after loading history
                              chatArea.scrollTop = chatArea.scrollHeight;
                              break;
-                         case 'privateSystem': // Handle private system messages from server
-                             appendMessage(data.text, 'private-system'); // Use the new distinct class
+                         case 'privateSystem':
+                             appendMessage(data.text, 'private-system', data.timestamp);
                              break;
-                        case 'action': // Handle /me action messages
-                             // Use case-insensitive comparison for robustness
+                        case 'action':
                              const actionClass = data.username?.toLowerCase() === username?.toLowerCase() ? 'my-message' : 'other-message';
-                             // Pass both the alignment class and the specific action class
-                             appendMessage(data.text, ['action', actionClass]);
+                             appendMessage(data.text, ['action', actionClass], data.timestamp);
                               break;
                          default:
-                            appendMessage(`Received unknown format: ${event.data}`, 'system');
+                            appendMessage(`Received unknown format: ${event.data}`, 'system', Date.now()); // Or null if no relevant timestamp
                     }
                 } catch (e) {
                     console.error("Failed to parse message or invalid message format:", event.data, e);
-                    appendMessage(`Received raw: ${event.data}`, 'system');
+                    appendMessage(`Received raw: ${event.data}`, 'system', Date.now()); // Or null
                 }
             };
 
@@ -508,7 +509,7 @@
             }
         }
 
-        function appendMessage(messageHTML, typeClass = '') {
+        function appendMessage(messageHTML, typeClass = '', timestamp = null) {
             const messageElement = document.createElement('p');
             let addDots = true; // Dots for (almost) all messages by default
             let isMyMsg = false;
@@ -536,23 +537,80 @@
                 messageWrapper.classList.add('message-wrapper');
 
                 if (isMyMsg) {
-                    // This will apply to p.my-message and p.action.my-message
                     messageWrapper.classList.add('my-message-wrapper');
                 } else {
-                    // This will apply to p.other-message, p.action.other-message, p.system, p.private-system
                     messageWrapper.classList.add('other-message-wrapper');
+                }
+
+                if (timestamp) { // Store timestamp if available
+                    messageWrapper.dataset.timestamp = timestamp;
                 }
 
                 const optionsIcon = document.createElement('span');
                 optionsIcon.classList.add('message-options');
                 optionsIcon.innerHTML = '&#8942;'; // Vertical ellipsis HTML entity (⋮)
 
+                messageWrapper.addEventListener('click', (event) => {
+                    const wrapper = event.currentTarget;
+                    const iconElement = wrapper.querySelector('.message-options');
+                    const storedTimestamp = wrapper.dataset.timestamp;
+                    const popover = document.getElementById('message-context-menu');
+
+                    if (popover && iconElement) { // Check iconElement exists
+                        try {
+                            if (storedTimestamp) {
+                                const date = new Date(parseInt(storedTimestamp));
+                                popover.innerHTML = `<p style="margin:0;">${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</p>` +
+                                                  `<p style="margin:0;font-size:0.9em;color:#555;display:none;">${date.toLocaleDateString()}</p>`;
+                            } else {
+                                popover.innerHTML = `<p style="margin:0;">No timestamp available</p>`;
+                            }
+
+                            const iconRect = iconElement.getBoundingClientRect();
+
+                            if (typeof popover.showPopover === 'function') {
+                                popover.showPopover(); // Make the popover active
+                            } else {
+                                console.warn('popover.showPopover() not available, trying to manually display');
+                                popover.style.display = 'block';
+                            }
+                            
+                            // Defer position calculation to the next animation frame
+                            requestAnimationFrame(() => {
+                                const popoverWidth = popover.offsetWidth;
+                                const popoverHeight = popover.offsetHeight;
+
+                                // Position popover to be centered horizontally above the icon
+                                let newLeft = iconRect.left + (iconRect.width / 2) - (popoverWidth / 2);
+                                let newTop = iconRect.top - popoverHeight; // Bottom of popover aligns with top of icon
+
+                                // Basic boundary checks to keep it on screen
+                                if (newLeft < 5) newLeft = 5; // Small margin from edge
+                                if (newTop < 5) newTop = 5;   // Small margin from edge
+                                if (newLeft + popoverWidth > window.innerWidth - 5) {
+                                    newLeft = window.innerWidth - popoverWidth - 5;
+                                }
+                                if (newTop + popoverHeight > window.innerHeight - 5) {
+                                    newTop = window.innerHeight - popoverHeight - 5;
+                                }
+                                
+                                popover.style.position = 'fixed'; // Ensure it's fixed for viewport-relative positioning
+                                popover.style.left = newLeft + 'px';
+                                popover.style.top = newTop + 'px';
+                            });
+
+                        } catch (e) {
+                            console.error("Error handling popover: ", e);
+                            if (popover && typeof popover.hidePopover === 'function') popover.hidePopover();
+                            else if (popover) popover.style.display = 'none';
+                        }
+                    }
+                });
+
                 if (isMyMsg) {
-                    // My message: [dots] [bubble]
                     messageWrapper.appendChild(optionsIcon);
                     messageWrapper.appendChild(messageElement);
                 } else {
-                    // Other's message (or system/action/private): [bubble] [dots]
                     messageWrapper.appendChild(messageElement);
                     messageWrapper.appendChild(optionsIcon);
                 }
@@ -622,5 +680,8 @@
          });
 
     </script>
+    <div id="message-context-menu" popover>
+        <!-- Content will be set by JavaScript -->
+    </div>
 </body>
 </html>
