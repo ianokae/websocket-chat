@@ -126,7 +126,7 @@
             border-radius: 8px;
             word-wrap: break-word;
             max-width: 90%; /* Prevent messages from taking full width */
-            clear: both; /* Ensure floats don't overlap */
+            /* clear: both;  Removed as flex wrappers will handle layout */
         }
         #chat-area p.system {
              font-style: italic;
@@ -136,14 +136,12 @@
              max-width: 100%;
         }
          #chat-area p.my-message {
-             float: right; /* Align own messages to the right */
-             margin-left: 10%; /* Indent user's own messages */
+             /* float: right; Removed */
              background-color: #d1ecf1; /* Light blue background */
              text-align: right;
          }
          #chat-area p.other-message {
-              float: left; /* Align others' messages to the left */
-              margin-right: 10%; /* Indent other messages */
+              /* float: left; Removed */
               background-color: #e2e3e5; /* Light grey background */
               text-align: left;
          }
@@ -157,6 +155,33 @@
             display: table;
             clear: both;
         }
+
+        /* NEW styles for message wrapper and options icon */
+        .message-wrapper {
+            display: flex;
+            align-items: center; /* Vertically center icon and bubble */
+            /* margin for the wrapper can be added if needed, but p already has margin */
+        }
+
+        .my-message-wrapper {
+            justify-content: flex-end; /* Aligns flex items (dots and bubble) to the right */
+        }
+        /* .other-message-wrapper will use default justify-content: flex-start */
+
+        .message-options {
+            font-size: 1.1em; /* Adjust size of the dots icon */
+            color: #888;
+            cursor: pointer;
+            padding: 0 8px;   /* Spacing around dots, outside the bubble */
+            visibility: hidden; /* Hidden by default */
+            line-height: 1;   /* Prevents extra vertical space from font */
+        }
+
+        /* Show options icon on hover of the message wrapper */
+        .message-wrapper:hover .message-options {
+            visibility: visible;
+        }
+        /* END NEW styles */
 
         #chat-area p.action { /* Style for /me action messages */
             font-style: italic;
@@ -335,8 +360,8 @@
             // Use window.location.hostname for dynamic local/deployed detection if needed
             // const wsHost = window.location.hostname || 'localhost';
             // websocket = new WebSocket(`ws://${wsHost}:8086`);
-            websocket = new WebSocket('ws://3.72.72.221:8086');
-            //websocket = new WebSocket('ws://10.0.0.3:8086');
+            //websocket = new WebSocket('ws://3.72.72.221:8086');
+            websocket = new WebSocket('ws://10.0.0.18:8086');
 
 
             websocket.onopen = () => {
@@ -485,17 +510,68 @@
 
         function appendMessage(messageHTML, typeClass = '') {
             const messageElement = document.createElement('p');
-            // Handle single class string or array of classes
+            let addDots = false;
+            let isMyMsg = false;
+            let isAction = false; // To specifically exclude action messages from getting dots
+
+            // Determine message type and if dots should be added
             if (Array.isArray(typeClass)) {
                 messageElement.classList.add(...typeClass);
-            } else if (typeClass) {
+                if (typeClass.includes('action')) {
+                    isAction = true;
+                }
+                // Only add dots if it's not an action message
+                if (!isAction) {
+                    if (typeClass.includes('my-message')) { 
+                        addDots = true; 
+                        isMyMsg = true; 
+                    }
+                    else if (typeClass.includes('other-message')) { 
+                        addDots = true; 
+                    }
+                }
+            } else if (typeof typeClass === 'string' && typeClass) {
                 messageElement.classList.add(typeClass);
+                // `typeClass` could be 'system', 'private-system', 'my-message', or 'other-message'
+                if (typeClass === 'my-message') { 
+                    addDots = true; 
+                    isMyMsg = true; 
+                }
+                else if (typeClass === 'other-message') { 
+                    addDots = true; 
+                }
             }
             messageElement.innerHTML = messageHTML; // Use innerHTML for <strong> tags etc.
 
              const shouldScroll = chatArea.scrollTop + chatArea.clientHeight >= chatArea.scrollHeight - 20; // Check if near bottom
 
-            chatArea.appendChild(messageElement);
+            if (addDots) {
+                const messageWrapper = document.createElement('div');
+                messageWrapper.classList.add('message-wrapper');
+                if (isMyMsg) {
+                    messageWrapper.classList.add('my-message-wrapper');
+                } else {
+                    messageWrapper.classList.add('other-message-wrapper'); // Assumes other-message if addDots is true & not myMsg
+                }
+
+                const optionsIcon = document.createElement('span');
+                optionsIcon.classList.add('message-options');
+                optionsIcon.innerHTML = '&#8942;'; // Vertical ellipsis HTML entity (⋮)
+
+                if (isMyMsg) {
+                    // My message: [dots] [bubble]
+                    messageWrapper.appendChild(optionsIcon);
+                    messageWrapper.appendChild(messageElement);
+                } else {
+                    // Other's message: [bubble] [dots]
+                    messageWrapper.appendChild(messageElement);
+                    messageWrapper.appendChild(optionsIcon);
+                }
+                chatArea.appendChild(messageWrapper);
+            } else {
+                // For system, action, private-system messages, append the p element directly
+                chatArea.appendChild(messageElement);
+            }
 
             // Scroll to bottom only if user was already near the bottom
             if(shouldScroll) {
