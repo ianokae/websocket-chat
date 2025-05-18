@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Simple Static WebSocket Chat</title>
+    <style>
+        #chat-area {
+            border: 1px solid #ccc;
+            /* Increased height */
+            height: 400px;
+            overflow-y: scroll;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        #message-input {
+            width: 80%;
+            padding: 8px;
+            margin-right: 5px;
+        }
+        button {
+            padding: 8px 12px;
+        }
+        /* Style paragraphs inside chat area for better spacing */
+        #chat-area p {
+            margin: 5px 0;
+            word-wrap: break-word; /* Ensure long messages wrap */
+        }
+    </style>
+</head>
+<body>
+    <h1>WebSocket Chat</h1>
+    <div id="chat-area"></div>
+    <div>
+        <input type="text" id="message-input" placeholder="Enter your message" disabled>
+        <button onclick="sendMessage()" id="send-button" disabled>Send</button>
+    </div>
+
+    <script>
+        const chatArea = document.getElementById('chat-area');
+        const messageInput = document.getElementById('message-input');
+        const sendButton = document.getElementById('send-button');
+        let websocket;
+        let username; // Variable to store the username
+
+        function getUserNameAndConnect() {
+            username = prompt("Please enter your name:");
+            // Keep prompting if the username is empty or only whitespace, or if cancelled (null)
+            while (!username || username.trim() === "") {
+                username = prompt("Username cannot be empty. Please enter your name:");
+                if (username === null) { // User clicked cancel
+                    appendMessage("Chat entry cancelled.");
+                    return; // Stop execution if user cancels repeatedly
+                }
+            }
+            username = username.trim(); // Trim whitespace
+            appendMessage(`Welcome, ${username}! Connecting...`);
+            // Enable input and button now that we have a name
+            messageInput.disabled = false;
+            sendButton.disabled = false;
+            messageInput.placeholder = "Enter your message"; // Update placeholder
+            connectWebSocket(); // Now connect
+        }
+
+        function connectWebSocket() {
+            // Replace with your WebSocket server URL
+            websocket = new WebSocket('ws://3.72.72.221:8086');
+
+            websocket.onopen = () => {
+                appendMessage('System: Connected to WebSocket server.');
+                // Optional: Send a join message to the server
+                // websocket.send(JSON.stringify({ type: 'join', user: username }));
+            };
+
+            websocket.onmessage = (event) => {
+                // Assuming the server sends plain text messages (potentially prefixed by other users)
+                appendMessage(event.data);
+            };
+
+            websocket.onclose = () => {
+                appendMessage('System: Disconnected from WebSocket server. Attempting to reconnect...');
+                // Disable input during reconnection attempt
+                messageInput.disabled = true;
+                sendButton.disabled = true;
+                // Optionally attempt to reconnect after a delay
+                setTimeout(connectWebSocket, 2000); // Increased delay slightly
+            };
+
+            websocket.onerror = (errorEvent) => {
+                appendMessage('System: WebSocket error occurred. See console for details.');
+                console.error('WebSocket Error:', errorEvent);
+                // Consider disabling input on error too, depending on desired behavior
+                 messageInput.disabled = true;
+                 sendButton.disabled = true;
+            };
+        }
+
+        function sendMessage() {
+            const messageText = messageInput.value.trim();
+            if (!messageText) {
+                return; // Don't send empty messages
+            }
+
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                // Prefix the message with the username
+                const messageToSend = `${username}: ${messageText}`;
+                websocket.send(messageToSend);
+                // Append the sent message *locally* immediately for better UX
+                // We don't add "Sent:" anymore, just display it as it will appear to others
+                appendMessage(messageToSend);
+                messageInput.value = ''; // Clear the input field
+            } else {
+                appendMessage('System: Not connected to WebSocket server. Cannot send message.');
+            }
+        }
+
+        function appendMessage(message) {
+            const messageElement = document.createElement('p');
+            messageElement.textContent = message;
+            chatArea.appendChild(messageElement);
+            chatArea.scrollTop = chatArea.scrollHeight; // Scroll to bottom
+        }
+
+        // --- Initialization ---
+        // Disable input until username is entered and connected
+        messageInput.disabled = true;
+        sendButton.disabled = true;
+        messageInput.placeholder = "Enter your name first...";
+
+        // Start the process by asking for the username
+        getUserNameAndConnect();
+
+        // Allow sending message by pressing Enter key in the input field
+        messageInput.addEventListener('keypress', function (e) {
+            if (e.key === 'Enter' && !messageInput.disabled) {
+                sendMessage();
+            }
+        });
+
+    </script>
+</body>
+</html>
