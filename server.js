@@ -521,7 +521,7 @@ async function checkIfAiAddressed(messageText) {
     }
     try {
         // Define the desired JSON structure and instruct the model to use it.
-        const checkPrompt = `Analyze the following chat message to determine if the user is directly addressing the AI bot named "ai" (e.g., asking it a question, giving it a command, mentioning it directly in a way that requires a response). Consider the context of a casual group chat.
+        const checkPrompt = `Analyze the following chat message to determine if the user is directly addressing the AI bot (you), named "ai" (e.g., asking it a question, giving it a command, mentioning it directly in a way that requests and requires a response). Consider the context of a casual group chat.  Note that the user may simply be mentioning you and/or AI to other people, so you need to discern if it's a message to you (ai), requiring a response, or about you (ai)., not requiring a response as nothing was actually explicitly directed at you.
 
 Respond with a JSON object matching this schema:
 {
