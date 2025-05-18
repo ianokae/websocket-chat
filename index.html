@@ -1,136 +1,330 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Simple Static WebSocket Chat</title>
+    <title>WebSocket Chat with User List</title>
     <style>
-        #chat-area {
-            border: 1px solid #ccc;
-            /* Increased height */
-            height: 400px;
-            overflow-y: scroll;
+        body {
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            margin: 0;
             padding: 10px;
+            box-sizing: border-box;
+        }
+        h1 {
+            text-align: center;
+            margin-top: 0;
+            flex-shrink: 0; /* Prevent h1 from shrinking */
+        }
+        .main-container {
+            display: flex;
+            flex-grow: 1; /* Allow container to fill height */
+            min-height: 0; /* Important for flex children scrolling */
+            gap: 15px; /* Space between chat and user list */
             margin-bottom: 10px;
         }
+        #chat-container {
+            flex-basis: 75%; /* Chat takes up more space */
+            display: flex;
+            flex-direction: column;
+            min-width: 0; /* Prevent overflow */
+        }
+        #user-list-container {
+             flex-basis: 25%;
+             display: flex;
+             flex-direction: column;
+             border: 1px solid #ccc;
+             background-color: #f0f0f0;
+             border-radius: 4px;
+             min-width: 150px; /* Minimum width for user list */
+        }
+         #user-list-container h2 {
+             margin: 0;
+             padding: 10px;
+             background-color: #e0e0e0;
+             font-size: 1em;
+             border-bottom: 1px solid #ccc;
+             flex-shrink: 0;
+         }
+        #chat-area {
+            border: 1px solid #ccc;
+            height: 100%; /* Fill available space in container */
+            overflow-y: scroll;
+            padding: 10px;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+            flex-grow: 1; /* Allow chat area to grow */
+        }
+        #user-list {
+            list-style: none;
+            padding: 10px;
+            margin: 0;
+            overflow-y: auto; /* Scroll if list is long */
+            flex-grow: 1;
+        }
+        #user-list li {
+             padding: 4px 0;
+             border-bottom: 1px dashed #ddd;
+        }
+         #user-list li:last-child {
+             border-bottom: none;
+         }
+
+        .input-area {
+            display: flex;
+            margin-top: 10px; /* Space above input */
+            flex-shrink: 0; /* Prevent input area from shrinking */
+        }
         #message-input {
-            width: 80%;
-            padding: 8px;
+            flex-grow: 1; /* Input takes remaining width */
+            padding: 10px;
             margin-right: 5px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
         }
         button {
-            padding: 8px 12px;
+            padding: 10px 15px;
+            border: none;
+            background-color: #007bff;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
         }
-        /* Style paragraphs inside chat area for better spacing */
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        button:hover:not(:disabled) {
+            background-color: #0056b3;
+        }
         #chat-area p {
-            margin: 5px 0;
-            word-wrap: break-word; /* Ensure long messages wrap */
+            margin: 6px 0;
+            padding: 5px 10px;
+            border-radius: 8px;
+            word-wrap: break-word;
+            max-width: 90%; /* Prevent messages from taking full width */
+            clear: both; /* Ensure floats don't overlap */
+        }
+        #chat-area p.system {
+             font-style: italic;
+             color: #555;
+             background-color: #eee;
+             text-align: center;
+             max-width: 100%;
+        }
+         #chat-area p.my-message {
+             float: right; /* Align own messages to the right */
+             margin-left: 10%; /* Indent user's own messages */
+             background-color: #d1ecf1; /* Light blue background */
+             text-align: right;
+         }
+         #chat-area p.other-message {
+              float: left; /* Align others' messages to the left */
+              margin-right: 10%; /* Indent other messages */
+              background-color: #e2e3e5; /* Light grey background */
+              text-align: left;
+         }
+         #chat-area p strong { /* Style the username part */
+             color: #0056b3;
+             margin-right: 5px;
+         }
+         /* Clearfix for floated messages inside chat-area */
+        #chat-area::after {
+            content: "";
+            display: table;
+            clear: both;
         }
     </style>
 </head>
 <body>
     <h1>WebSocket Chat</h1>
-    <div id="chat-area"></div>
-    <div>
-        <input type="text" id="message-input" placeholder="Enter your message" disabled>
-        <button onclick="sendMessage()" id="send-button" disabled>Send</button>
+
+    <div class="main-container">
+        <div id="chat-container">
+            <div id="chat-area">
+                <p class="system">Enter your name to connect...</p>
+            </div>
+            <div class="input-area">
+                <input type="text" id="message-input" placeholder="Connecting..." disabled>
+                <button onclick="sendMessage()" id="send-button" disabled>Send</button>
+            </div>
+        </div>
+
+        <div id="user-list-container">
+            <h2>Users Online (<span id="user-count">0</span>)</h2>
+            <ul id="user-list">
+                <!-- User list will be populated here -->
+                <li>Loading...</li>
+            </ul>
+        </div>
     </div>
+
 
     <script>
         const chatArea = document.getElementById('chat-area');
         const messageInput = document.getElementById('message-input');
         const sendButton = document.getElementById('send-button');
+        const userListElement = document.getElementById('user-list');
+        const userCountElement = document.getElementById('user-count');
         let websocket;
         let username; // Variable to store the username
 
         function getUserNameAndConnect() {
+            chatArea.innerHTML = ''; // Clear initial message
+            appendMessage("Please enter your name:", "system");
             username = prompt("Please enter your name:");
-            // Keep prompting if the username is empty or only whitespace, or if cancelled (null)
+
             while (!username || username.trim() === "") {
                 username = prompt("Username cannot be empty. Please enter your name:");
-                if (username === null) { // User clicked cancel
-                    appendMessage("Chat entry cancelled.");
-                    return; // Stop execution if user cancels repeatedly
+                if (username === null) {
+                    appendMessage("Chat entry cancelled.", "system");
+                    messageInput.placeholder = "Connection cancelled.";
+                    disableInput(); // Keep input disabled
+                    return;
                 }
             }
-            username = username.trim(); // Trim whitespace
-            appendMessage(`Welcome, ${username}! Connecting...`);
-            // Enable input and button now that we have a name
-            messageInput.disabled = false;
-            sendButton.disabled = false;
-            messageInput.placeholder = "Enter your message"; // Update placeholder
-            connectWebSocket(); // Now connect
+            username = username.trim();
+            appendMessage(`Welcome, ${username}! Connecting...`, "system");
+            messageInput.placeholder = `Connecting as ${username}...`;
+            connectWebSocket(); // Attempt to connect
         }
 
         function connectWebSocket() {
-            // Replace with your WebSocket server URL
-            websocket = new WebSocket('ws://3.72.72.221:8086');
+            // Replace with your WebSocket server URL if needed
+            // Use window.location.hostname for dynamic local/deployed detection if needed
+            // const wsHost = window.location.hostname || 'localhost';
+            // websocket = new WebSocket(`ws://${wsHost}:8086`);
+             websocket = new WebSocket('ws://3.72.72.221:8086');
+
 
             websocket.onopen = () => {
-                appendMessage('System: Connected to WebSocket server.');
-                // Optional: Send a join message to the server
-                // websocket.send(JSON.stringify({ type: 'join', user: username }));
+                appendMessage('Connected to server. Identifying yourself...', "system");
+                websocket.send(JSON.stringify({ type: 'setUsername', username: username }));
+                // Input enabled after server confirms username (or immediately if less strict)
+                // Let's enable it here for now, assuming success is likely.
+                messageInput.disabled = false;
+                sendButton.disabled = false;
+                messageInput.placeholder = "Enter your message";
+                messageInput.focus();
             };
 
             websocket.onmessage = (event) => {
-                // Assuming the server sends plain text messages (potentially prefixed by other users)
-                appendMessage(event.data);
+                try {
+                    const data = JSON.parse(event.data);
+                    console.log("Received data:", data); // Log received data
+
+                    switch(data.type) {
+                        case 'message':
+                            const messageClass = data.username === username ? 'my-message' : 'other-message';
+                            // Avoid displaying sender's name if it's their own message for cleaner look
+                            const displayName = data.username === username ? 'You' : data.username;
+                            appendMessage(`<strong>${displayName}:</strong> ${data.text}`, messageClass);
+                            break;
+                        case 'system':
+                            appendMessage(data.text, 'system');
+                            // If system message indicates an error setting username, handle it
+                            if (data.text.startsWith("Error: Username")) {
+                                 disableInput();
+                                 // Maybe prompt again or inform user to refresh
+                                 alert(data.text + "\nPlease refresh and try a different name.");
+                                 websocket.close(); // Close the problematic connection
+                            }
+                            break;
+                        case 'userList':
+                            updateUserList(data.users);
+                            break;
+                        default:
+                            appendMessage(`Received unknown format: ${event.data}`, 'system');
+                    }
+                } catch (e) {
+                    console.error("Failed to parse message or invalid message format:", event.data, e);
+                    appendMessage(`Received raw: ${event.data}`, 'system');
+                }
             };
 
-            websocket.onclose = () => {
-                appendMessage('System: Disconnected from WebSocket server. Attempting to reconnect...');
-                // Disable input during reconnection attempt
-                messageInput.disabled = true;
-                sendButton.disabled = true;
-                // Optionally attempt to reconnect after a delay
-                setTimeout(connectWebSocket, 2000); // Increased delay slightly
+            websocket.onclose = (event) => {
+                const reason = event.reason || `code ${event.code}`;
+                appendMessage(`Disconnected: ${reason}. Attempting to reconnect...`, "system");
+                disableInput();
+                updateUserList([]); // Clear user list on disconnect
+                setTimeout(connectWebSocket, 3000);
             };
 
             websocket.onerror = (errorEvent) => {
-                appendMessage('System: WebSocket error occurred. See console for details.');
+                appendMessage('WebSocket error occurred. Check console.', "system");
                 console.error('WebSocket Error:', errorEvent);
-                // Consider disabling input on error too, depending on desired behavior
-                 messageInput.disabled = true;
-                 sendButton.disabled = true;
+                disableInput();
+                 updateUserList([]); // Clear user list on error
+                // Consider stopping reconnect attempts after multiple errors
             };
+        }
+
+        function disableInput() {
+            messageInput.disabled = true;
+            sendButton.disabled = true;
+            messageInput.placeholder = "Disconnected";
         }
 
         function sendMessage() {
             const messageText = messageInput.value.trim();
             if (!messageText) {
-                return; // Don't send empty messages
+                return;
             }
 
             if (websocket && websocket.readyState === WebSocket.OPEN) {
-                // Prefix the message with the username
-                const messageToSend = `${username}: ${messageText}`;
-                websocket.send(messageToSend);
-                // Append the sent message *locally* immediately for better UX
-                // We don't add "Sent:" anymore, just display it as it will appear to others
-                appendMessage(messageToSend);
-                messageInput.value = ''; // Clear the input field
+                websocket.send(JSON.stringify({ type: 'message', text: messageText }));
+                 // Don't append own message here anymore, wait for broadcast from server
+                 // This ensures consistency if server modifies/rejects message
+                messageInput.value = '';
+                messageInput.focus();
             } else {
-                appendMessage('System: Not connected to WebSocket server. Cannot send message.');
+                appendMessage('Not connected. Cannot send message.', 'system');
             }
         }
 
-        function appendMessage(message) {
+        function appendMessage(messageHTML, typeClass = '') {
             const messageElement = document.createElement('p');
-            messageElement.textContent = message;
+            if (typeClass) {
+                 messageElement.classList.add(typeClass);
+            }
+            messageElement.innerHTML = messageHTML; // Use innerHTML for <strong> tags etc.
+
+             const shouldScroll = chatArea.scrollTop + chatArea.clientHeight >= chatArea.scrollHeight - 20; // Check if near bottom
+
             chatArea.appendChild(messageElement);
-            chatArea.scrollTop = chatArea.scrollHeight; // Scroll to bottom
+
+            // Scroll to bottom only if user was already near the bottom
+            if(shouldScroll) {
+                 chatArea.scrollTop = chatArea.scrollHeight;
+            }
         }
 
+        function updateUserList(users) {
+            userListElement.innerHTML = ''; // Clear current list
+            userCountElement.textContent = users.length; // Update count
+            if (users.length === 0) {
+                 userListElement.innerHTML = '<li>No one else is online.</li>';
+            } else {
+                users.forEach(user => {
+                    const userElement = document.createElement('li');
+                    // Highlight own username (optional)
+                    userElement.textContent = (user === username) ? `${user} (You)` : user;
+                     if (user === username) {
+                         userElement.style.fontWeight = 'bold';
+                     }
+                    userListElement.appendChild(userElement);
+                });
+            }
+        }
+
+
         // --- Initialization ---
-        // Disable input until username is entered and connected
-        messageInput.disabled = true;
-        sendButton.disabled = true;
-        messageInput.placeholder = "Enter your name first...";
+        document.addEventListener('DOMContentLoaded', getUserNameAndConnect);
 
-        // Start the process by asking for the username
-        getUserNameAndConnect();
-
-        // Allow sending message by pressing Enter key in the input field
         messageInput.addEventListener('keypress', function (e) {
             if (e.key === 'Enter' && !messageInput.disabled) {
+                 e.preventDefault();
                 sendMessage();
             }
         });
