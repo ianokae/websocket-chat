@@ -2,6 +2,7 @@
 <html>
 <head>
     <title>WebSocket Chat with User List</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body {
             font-family: sans-serif;
@@ -9,26 +10,41 @@
             flex-direction: column;
             height: 100vh;
             margin: 0;
-            padding: 10px;
             box-sizing: border-box;
+            overflow: hidden; /* Prevent body scroll */
         }
         h1 {
             text-align: center;
-            margin-top: 0;
+            margin: 10px 0; /* Adjust margin */
+            padding: 0 10px; /* Add padding */
             flex-shrink: 0; /* Prevent h1 from shrinking */
+            position: relative; /* Needed for absolute positioning of button */
+        }
+        /* Style for the toggle button (hidden by default on larger screens) */
+        #user-list-toggle {
+             display: none; /* Hidden on desktop */
+             position: absolute;
+             top: 50%;
+             right: 15px;
+             transform: translateY(-50%);
+             padding: 5px 10px;
+             font-size: 0.9em;
+             z-index: 105; /* Ensure it's above other header content */
         }
         .main-container {
             display: flex;
             flex-grow: 1; /* Allow container to fill height */
             min-height: 0; /* Important for flex children scrolling */
             gap: 15px; /* Space between chat and user list */
-            margin-bottom: 10px;
+            padding: 0 10px 10px 10px; /* Add padding */
+            box-sizing: border-box;
         }
         #chat-container {
             flex-basis: 75%; /* Chat takes up more space */
             display: flex;
             flex-direction: column;
             min-width: 0; /* Prevent overflow */
+            height: 100%; /* Ensure it takes full height within main-container */
         }
         #user-list-container {
              flex-basis: 25%;
@@ -38,6 +54,8 @@
              background-color: #f0f0f0;
              border-radius: 4px;
              min-width: 150px; /* Minimum width for user list */
+             height: 100%; /* Take full height of parent */
+             box-sizing: border-box;
         }
          #user-list-container h2 {
              margin: 0;
@@ -90,6 +108,7 @@
             color: white;
             border-radius: 4px;
             cursor: pointer;
+            font-size: 1em; /* Base font size */
         }
         button:disabled {
             background-color: #cccccc;
@@ -160,10 +179,98 @@
             border: 1px dashed #f44336; /* Dashed red border */
             max-width: 90%; /* Don't span full width */
         }
+
+        /* --- Responsive Styles --- */
+        @media (max-width: 768px) {
+            body {
+                /* Already 100vh, overflow hidden */
+                padding: 0; /* Remove padding */
+            }
+            h1 {
+                 font-size: 1.2em; /* Slightly smaller heading */
+                 margin: 8px 0;
+            }
+             /* Show and style the toggle button on mobile */
+             #user-list-toggle {
+                 display: inline-block; /* Show the button */
+             }
+
+            .main-container {
+                flex-direction: column; /* Stack elements vertically */
+                padding: 0 5px 5px 5px; /* Adjust padding */
+                gap: 10px;
+                 height: calc(100% - 40px); /* Adjust based on h1 height */
+            }
+
+            #chat-container {
+                flex-basis: auto; /* Reset basis */
+                width: 100%;    /* Take full width */
+                height: 100%;   /* Take full height */
+                order: 1;       /* Ensure chat area is primary */
+            }
+
+            #user-list-container {
+                display: none; /* Hide user list by default */
+                position: fixed; /* Or absolute relative to body/container */
+                top: 0;
+                right: 0;
+                width: 250px; /* Or desired width */
+                max-width: 80%; /* Max width */
+                height: 100%;
+                background-color: #f8f8f8;
+                z-index: 100;
+                border: 1px solid #ccc;
+                border-radius: 0; /* Remove radius for full height */
+                box-shadow: -2px 0 5px rgba(0,0,0,0.2);
+                flex-basis: auto; /* Reset basis */
+                order: 2; /* Display it 'later' conceptually if needed */
+                box-sizing: border-box; /* Include padding/border */
+            }
+
+            #user-list-container.visible {
+                 display: flex; /* Show user list when toggled */
+            }
+
+
+             #user-list-container h2 {
+                 /* Optionally add a close button here or style differently */
+                 padding: 15px;
+                 font-size: 1.1em;
+             }
+              #user-list {
+                  padding: 15px;
+              }
+
+            .input-area {
+                margin-top: 5px;
+                 padding: 0 5px; /* Add padding */
+            }
+
+            #message-input {
+                padding: 15px; /* Larger touch target */
+                font-size: 1.1em; /* Larger font */
+                margin-right: 8px;
+            }
+
+            #send-button {
+                padding: 15px 20px; /* Larger button */
+                font-size: 1.1em;
+            }
+
+             /* Adjust message margins if needed */
+             #chat-area p.my-message { margin-left: 5%; }
+             #chat-area p.other-message { margin-right: 5%; }
+             #chat-area p { max-width: 95%; }
+
+        }
+
     </style>
 </head>
 <body>
-    <h1>WebSocket Chat</h1>
+    <h1>
+        WebSocket Chat
+        <button id="user-list-toggle">Users</button> <!-- Toggle Button -->
+    </h1>
 
     <div class="main-container">
         <div id="chat-container">
@@ -194,6 +301,8 @@
         const userCountElement = document.getElementById('user-count');
         let websocket;
         let username; // Variable to store the username
+        const userListContainer = document.getElementById('user-list-container'); // Get user list container
+        const userListToggle = document.getElementById('user-list-toggle'); // Get toggle button
 
         function getUserNameAndConnect() {
             chatArea.innerHTML = ''; // Clear initial message
@@ -404,6 +513,16 @@
                     userListElement.appendChild(userElement);
                 });
             }
+
+            // Close user list overlay when clicking a user (optional, good UX)
+            // or clicking outside the list
+             if (window.innerWidth <= 768) { // Only add this listener on mobile view
+                userListElement.addEventListener('click', () => {
+                    if (userListContainer.classList.contains('visible')) {
+                         userListContainer.classList.remove('visible');
+                     }
+                 });
+             }
         }
 
 
@@ -416,6 +535,20 @@
                 sendMessage();
             }
         });
+
+         // --- Toggle User List ---
+         userListToggle.addEventListener('click', () => {
+             userListContainer.classList.toggle('visible');
+         });
+
+         // Optional: Close user list if clicking outside of it
+         document.addEventListener('click', (event) => {
+             if (userListContainer.classList.contains('visible') &&
+                 !userListContainer.contains(event.target) &&
+                 event.target !== userListToggle) {
+                 userListContainer.classList.remove('visible');
+             }
+         });
 
     </script>
 </body>
