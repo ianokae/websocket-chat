@@ -1,4 +1,6 @@
 require('dotenv').config(); // Load .env file variables
+const fs = require('fs'); // Add file system module
+const path = require('path'); // Add path module
 
 const WebSocket = require('ws');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
@@ -18,6 +20,47 @@ if (GOOGLE_API_KEY && GOOGLE_API_KEY !== "YOUR_API_KEY") {
     console.warn("Google API Key not found or is placeholder. AI functionality will be disabled.");
 }
 // --------------------------
+
+const HISTORY_FILE = path.join(__dirname, 'chat_history.json'); // Define history file path
+let chatHistory = []; // In-memory cache of history
+
+// Function to load history from file
+function loadHistory() {
+    try {
+        if (fs.existsSync(HISTORY_FILE)) {
+            const data = fs.readFileSync(HISTORY_FILE, 'utf8');
+            chatHistory = JSON.parse(data);
+            console.log(`Loaded ${chatHistory.length} messages from history.`);
+        } else {
+            console.log('No history file found, starting fresh.');
+            chatHistory = [];
+        }
+    } catch (error) {
+        console.error('Error loading chat history:', error);
+        chatHistory = []; // Start with empty history on error
+    }
+}
+
+// Function to append a message to the history file
+function appendToHistory(message) {
+     // Basic validation to avoid storing incomplete messages
+     if (!message || typeof message !== 'object' || !message.type) {
+         console.warn('Attempted to append invalid message to history:', message);
+         return;
+     }
+     chatHistory.push(message);
+     try {
+         // Asynchronous write is generally better for performance but adds complexity.
+         // Synchronous write is simpler for this example.
+         fs.writeFileSync(HISTORY_FILE, JSON.stringify(chatHistory, null, 2), 'utf8'); // Pretty print JSON
+     } catch (error) {
+         console.error('Error writing to chat history:', error);
+         // Optional: Implement retry logic or handle error more robustly
+     }
+}
+
+// Load history on server start
+loadHistory();
 
 const wss = new WebSocket.Server({ port: 8086 });
 
@@ -74,17 +117,24 @@ wss.on('connection', (ws) => {
                 ws.username = newUsername; // Attach to ws object for easy access
                 console.log(`Client identified as: ${newUsername}`);
 
-                // Notify the user they are set
-                safeSend(ws, { type: 'system', text: `You are connected as ${newUsername}.` });
+                // Send chat history ONLY to the newly joined client
+                sendChatHistory(ws);
 
-                // Send current user list ONLY to the newly joined client
+                // Notify the user they are set (after history is sent)
+                safeSend(ws, { type: 'system', text: `You are connected as ${newUsername}. Chat history loaded.` });
+
+                // Send current user list ONLY to the newly joined client (can stay here or move after history)
                 sendUserList(ws);
 
+                // Create join message object
+                 const joinMessage = {
+                     type: 'system',
+                     text: `${newUsername} has joined the chat.`
+                 };
+                // Append join message to history
+                appendToHistory(joinMessage);
                 // Notify all *other* clients that a new user joined
-                broadcast({
-                    type: 'system',
-                    text: `${newUsername} has joined the chat.`
-                }, ws); // Exclude the sender
+                broadcast(joinMessage, ws); // Exclude the sender
 
                 // Broadcast updated user list to EVERYONE
                 broadcastUserList();
@@ -109,6 +159,7 @@ wss.on('connection', (ws) => {
                     text: messageText
                 };
                 broadcast(originalMessage);
+                appendToHistory(originalMessage); // Append user message to history
 
                 // Check if message is for AI
                 if (messageText.toLowerCase().startsWith('ai ') && model) {
@@ -146,18 +197,24 @@ wss.on('connection', (ws) => {
             console.log(`Client ${username} disconnected (Code: ${code}, Reason: ${reasonText})`);
             const existed = clients.delete(ws); // Remove client
             if (existed) {
+                 // Create leave message object
+                 const leaveMessage = {
+                     type: 'system',
+                     text: `${username} has left the chat.`
+                 };
+                 // Append leave message to history
+                 appendToHistory(leaveMessage);
                  // Notify remaining clients
-                broadcast({
-                    type: 'system',
-                    text: `${username} has left the chat.`
-                });
-                // Broadcast updated user list
+                 broadcast(leaveMessage);
+                 // Broadcast updated user list
                 broadcastUserList();
             }
         } else {
             console.log(`Unidentified client disconnected (Code: ${code}, Reason: ${reasonText})`);
             clients.delete(ws); // Ensure removal if somehow added without username
         }
+        // Ensure the socket is terminated after an error
+        ws.terminate();
     });
 
     ws.on('error', (error) => {
@@ -168,10 +225,15 @@ wss.on('connection', (ws) => {
              console.log(`Removing client ${username || '(unidentified)'} due to error.`);
              clients.delete(ws);
               if (username) {
-                   broadcast({
+                   // Create disconnect error message object
+                   const disconnectErrorMessage = {
                        type: 'system',
                        text: `${username} disconnected due to an error.`
-                   });
+                   };
+                   // Append disconnect error message to history
+                   appendToHistory(disconnectErrorMessage);
+                   // Notify remaining clients
+                   broadcast(disconnectErrorMessage);
                    broadcastUserList();
               }
         }
@@ -271,3 +333,11 @@ async function getGeminiResponse(prompt) {
     }
 }
 // -----------------------------------------------
+
+// Helper function to send the full chat history to a specific client
+function sendChatHistory(targetWs) {
+    if (targetWs.readyState === WebSocket.OPEN) {
+         console.log(`Sending chat history (${chatHistory.length} messages) to ${targetWs.username}`);
+         safeSend(targetWs, { type: 'chatHistory', history: chatHistory });
+    }
+}
