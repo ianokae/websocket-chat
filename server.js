@@ -85,6 +85,42 @@ wss.on('connection', (ws) => {
 
         const currentUsername = clients.get(ws); // Get username associated with this ws connection
 
+        // --- Handle Command Type --- New section
+        if (parsedMessage.type === 'command') {
+            if (!currentUsername) {
+                 console.log('Command received from unidentified client');
+                 safeSend(ws, { type: 'privateSystem', text: 'Error: Cannot process command, not fully connected.' });
+                 return;
+             }
+
+             const command = parsedMessage.command?.toLowerCase();
+             const args = parsedMessage.args?.trim() || ''; // Ensure args is a string
+
+             console.log(`Received command '/${command}' from ${currentUsername} with args: "${args}"`);
+
+             switch (command) {
+                 case 'me':
+                     if (!args) {
+                         safeSend(ws, { type: 'privateSystem', text: 'Usage: /me <action>' });
+                         return;
+                     }
+                     const actionText = `* ${currentUsername} ${args} *`;
+                     const actionMessage = {
+                         type: 'action', // Use a dedicated type for /me actions
+                         username: currentUsername, // Add username for client-side alignment
+                         text: actionText
+                     };
+                     broadcast(actionMessage);
+                     appendToHistory(actionMessage); // Append action to history
+                     break;
+                 // Add more command cases here in the future
+                 default:
+                     safeSend(ws, { type: 'privateSystem', text: `Unknown command '/${command}'` });
+             }
+             return; // Command processed, no further action needed
+         }
+         // --- End Handle Command Type ---
+
         switch (parsedMessage.type) {
             case 'setUsername':
                 const newUsername = parsedMessage.username?.trim();
