@@ -159,7 +159,7 @@ wss.on('connection', (ws, req) => {
             console.log('Received:', parsedMessage);
         } catch (error) {
             console.error('Failed to parse message or invalid message format:', message.toString());
-            safeSend(ws, { type: 'system', text: 'Error: Invalid message format.' });
+            safeSend(ws, { type: 'system', text: 'Error: Invalid message format.', timestamp: Date.now() });
             return;
         }
 
@@ -170,7 +170,7 @@ wss.on('connection', (ws, req) => {
         if (parsedMessage.type === 'command') {
             if (!currentUsername) {
                  console.log('Command received from unidentified client');
-                 safeSend(ws, { type: 'privateSystem', text: 'Error: Cannot process command, not fully connected.' });
+                 safeSend(ws, { type: 'privateSystem', text: 'Error: Cannot process command, not fully connected.', timestamp: Date.now() });
                  return;
              }
 
@@ -182,7 +182,7 @@ wss.on('connection', (ws, req) => {
              switch (command) {
                  case 'me':
                      if (!args) {
-                         safeSend(ws, { type: 'privateSystem', text: 'Usage: /me <action>' });
+                         safeSend(ws, { type: 'privateSystem', text: 'Usage: /me <action>', timestamp: Date.now() });
                          return;
                      }
                      // Use helpers to create and process the action message
@@ -199,7 +199,8 @@ wss.on('connection', (ws, req) => {
 
                      const leaveMessage = {
                          type: 'system',
-                         text: leaveText
+                         text: leaveText,
+                         timestamp: Date.now()
                      };
 
                      console.log(`${currentUsername} is quitting.${reason ? ' Reason: ' + reason : ''}`);
@@ -214,14 +215,14 @@ wss.on('connection', (ws, req) => {
                      break;
                  case 'whois':
                      if (!args) {
-                         safeSend(ws, { type: 'privateSystem', text: 'Usage: /whois <username>' });
+                         safeSend(ws, { type: 'privateSystem', text: 'Usage: /whois <username>', timestamp: Date.now() });
                          return;
                      }
                      const targetUsername = args.trim();
                      let foundUser = false;
                      for (const [clientWs, clientData] of clients.entries()) {
                          if (clientData.username && clientData.username.toLowerCase() === targetUsername.toLowerCase()) {
-                             safeSend(ws, { type: 'privateSystem', text: `User ${clientData.username} is connected from IP: ${clientData.ip}` });
+                             safeSend(ws, { type: 'privateSystem', text: `User ${clientData.username} is connected from IP: ${clientData.ip}`, timestamp: Date.now() });
                              foundUser = true;
                              break;
                          }
@@ -229,15 +230,15 @@ wss.on('connection', (ws, req) => {
                      if (!foundUser) {
                          // Check if it's the AI they are asking about
                          if (targetUsername.toLowerCase() === 'ai') {
-                             safeSend(ws, { type: 'privateSystem', text: 'User AI is the Artificial Intelligence of this chat.' });
+                             safeSend(ws, { type: 'privateSystem', text: 'User AI is the Artificial Intelligence of this chat.', timestamp: Date.now() });
                          } else {
-                             safeSend(ws, { type: 'privateSystem', text: `User "${targetUsername}" not found.` });
+                             safeSend(ws, { type: 'privateSystem', text: `User "${targetUsername}" not found.`, timestamp: Date.now() });
                          }
                      }
                      break;
                  // Add more command cases here in the future
                  default:
-                     safeSend(ws, { type: 'privateSystem', text: `Unknown command '/${command}'` });
+                     safeSend(ws, { type: 'privateSystem', text: `Unknown command '/${command}'`, timestamp: Date.now() });
              }
              return; // Command processed, no further action needed
          }
@@ -248,7 +249,7 @@ wss.on('connection', (ws, req) => {
                 const newUsername = parsedMessage.username?.trim();
                 if (!newUsername) {
                     console.log('Invalid username received');
-                    safeSend(ws, { type: 'system', text: 'Error: Invalid username provided.' });
+                    safeSend(ws, { type: 'system', text: 'Error: Invalid username provided.', timestamp: Date.now() });
                     ws.close(1008, "Invalid username"); // Close connection
                     return;
                 }
@@ -256,7 +257,7 @@ wss.on('connection', (ws, req) => {
                 // --- Add check for reserved AI name ---
                 if (newUsername.toLowerCase() === 'ai') {
                     console.log('Attempt to register as reserved username "AI".');
-                    safeSend(ws, { type: 'system', text: 'Error: Username "AI" is reserved.' });
+                    safeSend(ws, { type: 'system', text: 'Error: Username "AI" is reserved.', timestamp: Date.now() });
                     ws.close(1008, "Reserved username"); // Close connection
                     return;
                 }
@@ -274,7 +275,7 @@ wss.on('connection', (ws, req) => {
                 if (isTaken) {
                      console.log(`Username "${newUsername}" is already taken.`);
                      // Send specific error message the client can react to
-                     safeSend(ws, { type: 'system', text: `Error: Username "${newUsername}" is already taken.` });
+                     safeSend(ws, { type: 'system', text: `Error: Username "${newUsername}" is already taken.`, timestamp: Date.now() });
                      ws.close(1008, "Username taken"); // Close connection, client should show error and prompt again
                      return;
                 }
@@ -288,7 +289,7 @@ wss.on('connection', (ws, req) => {
                 sendChatHistory(ws);
 
                 // Notify the user they are set (after history is sent)
-                safeSend(ws, { type: 'system', text: `You are connected as ${newUsername}. Chat history loaded.` });
+                safeSend(ws, { type: 'system', text: `You are connected as ${newUsername}. Chat history loaded.`, timestamp: Date.now() });
 
                 // Send current user list ONLY to the newly joined client
                 sendUserList(ws);
@@ -307,7 +308,8 @@ wss.on('connection', (ws, req) => {
                 // Create join message object
                  const joinMessage = {
                      type: 'system',
-                     text: `${newUsername} has joined the chat.`
+                     text: `${newUsername} has joined the chat.`,
+                     timestamp: Date.now()
                  };
                  // Use helper to append history and broadcast (excluding sender)
                  processAndBroadcast(joinMessage, ws);
@@ -319,7 +321,7 @@ wss.on('connection', (ws, req) => {
             case 'message':
                 if (!currentUsername) {
                     console.log('Message received from unidentified client');
-                    safeSend(ws, { type: 'system', text: 'Error: Cannot send message, not fully connected.' });
+                    safeSend(ws, { type: 'system', text: 'Error: Cannot send message, not fully connected.', timestamp: Date.now() });
                     return;
                 }
                 const messageText = parsedMessage.text?.trim();
@@ -332,7 +334,8 @@ wss.on('connection', (ws, req) => {
                 const originalMessage = {
                     type: 'message',
                     username: currentUsername,
-                    text: messageText
+                    text: messageText,
+                    timestamp: Date.now()
                 };
                 processAndBroadcast(originalMessage); // Broadcast user message first
 
@@ -424,7 +427,8 @@ wss.on('connection', (ws, req) => {
                                         const aiMessage = {
                                             type: 'message',
                                             username: 'AI',
-                                            text: aiResponse // Use original (untrimmed) response
+                                            text: aiResponse,
+                                            timestamp: Date.now()
                                         };
                                         processAndBroadcast(aiMessage);
                                     }
@@ -457,7 +461,7 @@ wss.on('connection', (ws, req) => {
 
             default:
                 console.log('Received unknown message type:', parsedMessage.type);
-                safeSend(ws, { type: 'system', text: 'Error: Unknown message type.' });
+                safeSend(ws, { type: 'system', text: 'Error: Unknown message type.', timestamp: Date.now() });
         }
     });
 
@@ -477,7 +481,8 @@ wss.on('connection', (ws, req) => {
                      // Create leave message object
                      const leaveMessage = {
                          type: 'system',
-                         text: `${username} has left the chat.`
+                         text: `${username} has left the chat.`,
+                         timestamp: Date.now()
                      };
                      // Use helper to append history and broadcast to everyone
                      processAndBroadcast(leaveMessage);
@@ -506,7 +511,8 @@ wss.on('connection', (ws, req) => {
                    // Create disconnect error message object
                    const disconnectErrorMessage = {
                        type: 'system',
-                       text: `${username} disconnected due to an error.`
+                       text: `${username} disconnected due to an error.`,
+                       timestamp: Date.now()
                    };
                    // Use helper to append history and broadcast
                    processAndBroadcast(disconnectErrorMessage);
@@ -575,7 +581,7 @@ function sendUserList(targetWs) {
      if (targetWs.readyState === WebSocket.OPEN) {
           const userList = getUserList();
           console.log(`Sending user list to ${targetWs.username}:`, userList);
-          safeSend(targetWs, { type: 'userList', users: userList });
+          safeSend(targetWs, { type: 'userList', users: userList, timestamp: Date.now() });
      }
 }
 
@@ -584,8 +590,8 @@ function broadcastUserList() {
     const userList = getUserList();
      console.log('Broadcasting updated user list:', userList);
      // Broadcast the user list type message (no sender exclusion needed here)
-     const messageObj = { type: 'userList', users: userList };
-     const messageString = JSON.stringify(messageObj);
+     const messageObj = { type: 'userList', users: userList, timestamp: Date.now() };
+     // const messageString = JSON.stringify(messageObj); // No longer need to stringify here as safeSend does it
      clients.forEach((data, clientWs) => { // data is {username, ip}
           if (data.username && clientWs.readyState === WebSocket.OPEN) { // Only send to identified, open clients
               safeSend(clientWs, messageObj);
@@ -713,7 +719,8 @@ function createActionMessage(username, actionText) {
     return {
         type: 'action',
         username: username, // Include username for client-side logic if needed
-        text: formattedText
+        text: formattedText,
+        timestamp: Date.now()
     };
 }
 
