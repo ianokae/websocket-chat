@@ -613,6 +613,26 @@
                     }
                 });
 
+                // Add mouseout listener to hide the popover
+                messageWrapper.addEventListener('mouseout', (event) => {
+                    // Check if the mouse is truly leaving the wrapper and not just entering a child like the popover itself
+                    // This check might not be strictly necessary if popover.hidePopover() is idempotent
+                    // and if the popover is not a child of the messageWrapper in the DOM.
+                    if (!event.currentTarget.contains(event.relatedTarget)) {
+                        const popover = document.getElementById('message-context-menu');
+                        if (popover && typeof popover.hidePopover === 'function') {
+                            // Check if popover is actually open before trying to hide
+                            // A common way to check for popover visibility is to see if it has the :popover-open pseudo-class
+                            // or check for an open attribute if it's being used. 
+                            // However, directly calling hidePopover() is often safe.
+                            popover.hidePopover(); 
+                        } else if (popover) {
+                            // Fallback hide
+                            popover.style.display = 'none';
+                        }
+                    }
+                });
+
                 if (isMyMsg) {
                     messageWrapper.appendChild(optionsIcon);
                     messageWrapper.appendChild(messageElement);
