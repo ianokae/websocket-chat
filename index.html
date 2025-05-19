@@ -335,6 +335,7 @@
         }
 
     </style>
+    <script src="config.js"></script>
 </head>
 <body>
     <h1>
@@ -396,14 +397,9 @@
         }
 
         function connectWebSocket() {
-            // Replace with your WebSocket server URL if needed
-            // Use window.location.hostname for dynamic local/deployed detection if needed
-            // const wsHost = window.location.hostname || 'localhost';
-            // websocket = new WebSocket(`ws://${wsHost}:8086`);
-            websocket = new WebSocket('ws://3.72.72.221:8086');
-            //websocket = new WebSocket('ws://10.0.0.27:8086');
+            // Use the configured WebSocket server address
+            websocket = new WebSocket(config.websocketServer);
             lastMessageDateString = null; // Reset last message date on new connection/reconnection
-
 
             websocket.onopen = () => {
                 appendMessage('Connected to server. Identifying yourself...', "system");
