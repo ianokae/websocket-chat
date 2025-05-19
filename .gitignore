@@ -1,7 +1,6 @@
 # Ignore environment variables file
 .env
 chat_history.json
-config.js
 
 # Ignore node_modules directory
 node_modules/
@@ -14,3 +13,6 @@ node_modules/
 Thumbs.db
 
 *.pem
+
+# Ignore configuration files
+config.js

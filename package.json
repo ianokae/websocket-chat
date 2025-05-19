@@ -4,7 +4,9 @@
     "upload-client": "aws s3 cp index.html s3://simple-socket-chat/ --profile ian",
     "logs": "ssh -i simple-websocket-server.pem ec2-user@3.72.72.221 'journalctl -n 30 -u websocket-server.service'",
     "logs-follow": "ssh -i simple-websocket-server.pem ec2-user@3.72.72.221 'journalctl -f -u websocket-server.service'",
-    "logs-time": "ssh -i simple-websocket-server.pem ec2-user@3.72.72.221 'journalctl --since \"5 minutes ago\" -u websocket-server.service'"
+    "logs-time": "ssh -i simple-websocket-server.pem ec2-user@3.72.72.221 'journalctl --since \"5 minutes ago\" -u websocket-server.service'",
+    "config-local": "node scripts/config.js local",
+    "config-prod": "node scripts/config.js prod"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.0",
